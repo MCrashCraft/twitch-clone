@@ -1,6 +1,6 @@
 import { readFile } from "fs/promises";
 import path from "path";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { safeUploadPath } from "@/lib/storage";
 
@@ -13,8 +13,23 @@ const CONTENT_TYPES: Record<string, string> = {
   ".webp": "image/webp",
 };
 
+// Serve the placeholder inline rather than redirecting: a redirect built
+// from request.url points at the backend origin (e.g. localhost:3420),
+// which is unreachable when the app sits behind a reverse proxy.
+async function placeholder() {
+  const data = await readFile(
+    path.join(process.cwd(), "public", "placeholder-thumb.svg")
+  );
+  return new Response(new Uint8Array(data), {
+    headers: {
+      "Content-Type": "image/svg+xml",
+      "Cache-Control": "public, max-age=3600",
+    },
+  });
+}
+
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const video = await db.video.findUnique({
@@ -22,11 +37,7 @@ export async function GET(
     select: { thumbnailPath: true },
   });
 
-  if (!video?.thumbnailPath) {
-    return NextResponse.redirect(
-      new URL("/placeholder-thumb.svg", request.url)
-    );
-  }
+  if (!video?.thumbnailPath) return placeholder();
 
   try {
     const absolutePath = safeUploadPath(video.thumbnailPath);
@@ -40,8 +51,6 @@ export async function GET(
       },
     });
   } catch {
-    return NextResponse.redirect(
-      new URL("/placeholder-thumb.svg", request.url)
-    );
+    return placeholder();
   }
 }

@@ -22,7 +22,7 @@ Demo accounts (all with password `password420`): `blazeitplays`, `couchlocked`, 
 
 - **21+ age gate** — cookie-based interstitial before anything else loads
 - **Accounts** — username/email + password (bcrypt), JWT session in an httpOnly cookie (`jose`), zero-config dev secret (set `SESSION_SECRET` in production)
-- **Uploads** — MP4/WebM/Ogg up to 500 MB with optional JPEG/PNG/WebP thumbnail, saved to `uploads/` (gitignored)
+- **Uploads** — MP4/WebM/Ogg/MOV/M4V/3GP up to 500 MB with optional JPEG/PNG/WebP thumbnail and a progress bar, saved to `uploads/` (gitignored)
 - **Playback** — HTML5 player backed by a streaming route with full **HTTP Range** support, so seeking works
 - **Social** — likes, comments, subscriptions, channel pages
 - **Browse** — home feed with cannabis-gaming category pills (Stoner Shooters, Puff & Puzzle, Speedruns & Sesh, …), search, view counts

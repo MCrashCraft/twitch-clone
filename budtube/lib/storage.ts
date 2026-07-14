@@ -7,6 +7,10 @@ export const VIDEO_TYPES: Record<string, string> = {
   "video/mp4": ".mp4",
   "video/webm": ".webm",
   "video/ogg": ".ogv",
+  // Phone cameras: iPhones record QuickTime .mov, some Androids .3gp.
+  "video/quicktime": ".mov",
+  "video/x-m4v": ".m4v",
+  "video/3gpp": ".3gp",
 };
 
 export const IMAGE_TYPES: Record<string, string> = {

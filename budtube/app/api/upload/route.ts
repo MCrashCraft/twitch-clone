@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
   }
   const videoExt = VIDEO_TYPES[video.type];
   if (!videoExt) {
-    return bad("Video must be MP4, WebM, or Ogg.");
+    return bad("Video must be MP4, WebM, Ogg, MOV, M4V, or 3GP.");
   }
   if (video.size > MAX_VIDEO_BYTES) {
     return bad("Video is too large (max 500 MB).");
