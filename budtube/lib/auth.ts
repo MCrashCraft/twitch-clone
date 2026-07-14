@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { SignJWT } from "jose";
 import { db } from "@/lib/db";
 import {
@@ -19,11 +19,17 @@ export async function createSession(user: { id: string; username: string }) {
     .setExpirationTime(`${SESSION_DURATION_SECONDS}s`)
     .sign(getSessionSecret());
 
+  // Mark the cookie Secure only when the request actually arrived over
+  // HTTPS (directly or via a reverse proxy). Keying this off NODE_ENV
+  // breaks sign-in when a production build is served over plain HTTP
+  // (e.g. hitting the server by IP on a LAN/VPN): browsers silently
+  // drop Secure cookies on insecure origins.
+  const proto = headers().get("x-forwarded-proto");
   cookies().set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
-    secure: process.env.NODE_ENV === "production",
+    secure: proto === "https",
     maxAge: SESSION_DURATION_SECONDS,
   });
 }
