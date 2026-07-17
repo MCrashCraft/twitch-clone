@@ -30,11 +30,6 @@ export default function RootLayout({
             here is medical or legal advice. Game (and everything else)
             responsibly.
           </p>
-          <p className="mt-2">
-            <a href="/support" className="text-bud-primary hover:underline">
-              Contact support
-            </a>
-          </p>
         </footer>
       </body>
     </html>

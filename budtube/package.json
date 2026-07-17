@@ -18,14 +18,12 @@
     "dotenv": "^17.4.2",
     "jose": "^5.9.6",
     "next": "^14.2.25",
-    "nodemailer": "^9.0.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20.17.0",
-    "@types/nodemailer": "^8.0.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "autoprefixer": "^10.4.20",
