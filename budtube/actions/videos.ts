@@ -11,7 +11,17 @@ export async function deleteVideo(videoId: string) {
 
   const video = await db.video.findUnique({ where: { id: videoId } });
   if (!video) return { error: "Video not found." };
-  if (video.userId !== session.userId) return { error: "You don't own this video." };
+
+  // Owners can delete their own videos; staff (ADMIN role) can delete any.
+  if (video.userId !== session.userId) {
+    const requester = await db.user.findUnique({
+      where: { id: session.userId },
+      select: { role: true },
+    });
+    if (requester?.role !== "ADMIN") {
+      return { error: "You don't own this video." };
+    }
+  }
 
   if (video.filePath) await removeUploadedFile(video.filePath);
   if (video.thumbnailPath) await removeUploadedFile(video.thumbnailPath);

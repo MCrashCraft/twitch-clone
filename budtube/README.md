@@ -18,6 +18,23 @@ npm run dev         # http://localhost:3420
 
 Demo accounts (all with password `password420`): `blazeitplays`, `couchlocked`, `sativa_speedruns`.
 
+## Admin account & support email
+
+Copy `.env.example` to `.env` and fill in `ADMIN_PASSWORD` plus the SMTP
+password (`SMTP_PASS`) — the `.env` file is gitignored so secrets stay out
+of the repo. Then create the admin:
+
+```bash
+npm run db:admin   # creates/updates the ADMIN_USERNAME account with role ADMIN
+```
+
+Admins (staff) can delete **any** video from its watch page; regular users
+can delete their own videos from the watch page or their dashboard.
+
+The **/support** page emails the address in `SUPPORT_EMAIL` through the
+configured SMTP server. If SMTP settings are missing the form shows a
+"not configured" error instead of failing silently.
+
 ## Features
 
 - **21+ age gate** — cookie-based interstitial before anything else loads

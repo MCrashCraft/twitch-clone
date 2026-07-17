@@ -4,7 +4,13 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { deleteVideo } from "@/actions/videos";
 
-export function DeleteVideoButton({ videoId }: { videoId: string }) {
+export function DeleteVideoButton({
+  videoId,
+  redirectTo,
+}: {
+  videoId: string;
+  redirectTo?: string;
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -14,6 +20,8 @@ export function DeleteVideoButton({ videoId }: { videoId: string }) {
       const result = await deleteVideo(videoId);
       if (result?.error) {
         window.alert(result.error);
+      } else if (redirectTo) {
+        router.push(redirectTo);
       } else {
         router.refresh();
       }

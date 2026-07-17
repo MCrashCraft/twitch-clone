@@ -7,6 +7,7 @@ import { formatViews, formatCount, timeAgo } from "@/lib/format";
 import { LikeButton } from "@/components/like-button";
 import { SubscribeButton } from "@/components/subscribe-button";
 import { CommentSection } from "@/components/comment-section";
+import { DeleteVideoButton } from "@/components/delete-video-button";
 
 export async function generateMetadata({
   params,
@@ -53,6 +54,13 @@ export default async function WatchPage({
     data: { views: { increment: 1 } },
   });
 
+  const viewer = session
+    ? await db.user.findUnique({
+        where: { id: session.userId },
+        select: { role: true },
+      })
+    : null;
+
   const [liked, subscribed] = session
     ? await Promise.all([
         db.videoLike
@@ -95,6 +103,7 @@ export default async function WatchPage({
   }
 
   const isOwnVideo = session?.userId === video.user.id;
+  const canDelete = isOwnVideo || viewer?.role === "ADMIN";
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
@@ -141,12 +150,17 @@ export default async function WatchPage({
               />
             )}
           </div>
-          <LikeButton
-            videoId={video.id}
-            initialLiked={liked}
-            initialCount={video._count.likes}
-            signedIn={!!session}
-          />
+          <div className="flex items-center gap-2">
+            <LikeButton
+              videoId={video.id}
+              initialLiked={liked}
+              initialCount={video._count.likes}
+              signedIn={!!session}
+            />
+            {canDelete && (
+              <DeleteVideoButton videoId={video.id} redirectTo="/" />
+            )}
+          </div>
         </div>
 
         {video.description && (
