@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Weather Radar</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#127783;</text></svg>" />
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0e0e10; color: #efeff1; }
+    #map { position: absolute; inset: 0; background: #0e0e10; }
+
+    .panel {
+      position: absolute; z-index: 1000;
+      background: rgba(24, 24, 27, 0.92);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+    }
+
+    #header {
+      top: 12px; left: 50%; transform: translateX(-50%);
+      padding: 8px 16px; display: flex; align-items: center; gap: 10px;
+      white-space: nowrap;
+    }
+    #header .dot { width: 9px; height: 9px; border-radius: 50%; background: #e91916; animation: pulse 1.6s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+    #header h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.02em; }
+    #frame-time { font-size: 13px; color: #adadb8; font-variant-numeric: tabular-nums; }
+    #frame-time .future { color: #58b8ff; }
+
+    #controls {
+      bottom: 18px; left: 50%; transform: translateX(-50%);
+      width: min(680px, calc(100% - 24px));
+      padding: 12px 16px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    #controls .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+    button {
+      background: #2f2f35; color: #efeff1; border: none; border-radius: 6px;
+      padding: 7px 12px; font-size: 13px; cursor: pointer; line-height: 1;
+      transition: background 0.15s;
+    }
+    button:hover { background: #3f3f46; }
+    button.primary { background: #9147ff; }
+    button.primary:hover { background: #772ce8; }
+    button:disabled { opacity: 0.4; cursor: default; }
+
+    input[type="range"] { flex: 1; accent-color: #9147ff; min-width: 120px; }
+    select {
+      background: #2f2f35; color: #efeff1; border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px; padding: 6px 8px; font-size: 12px; cursor: pointer;
+    }
+    label.ctl { font-size: 12px; color: #adadb8; display: flex; align-items: center; gap: 6px; }
+
+    #legend {
+      right: 12px; bottom: 18px; padding: 10px 12px; font-size: 11px; color: #adadb8;
+    }
+    #legend .bar {
+      width: 140px; height: 10px; border-radius: 5px; margin: 6px 0 2px;
+      background: linear-gradient(to right, #88eeee, #0099cc, #0044aa, #ffee00, #ff8800, #dd0000, #ff00ff);
+    }
+    #legend .labels { display: flex; justify-content: space-between; }
+
+    #status {
+      top: 12px; left: 12px; padding: 8px 12px; font-size: 12px; color: #adadb8;
+      max-width: 260px; display: none;
+    }
+    #status.visible { display: block; }
+
+    .leaflet-control-attribution { background: rgba(24,24,27,0.7) !important; color: #adadb8 !important; }
+    .leaflet-control-attribution a { color: #58b8ff !important; }
+    .leaflet-control-zoom a { background: #18181b !important; color: #efeff1 !important; border-color: rgba(255,255,255,0.1) !important; }
+
+    @media (max-width: 560px) {
+      #header h1 { font-size: 12px; }
+      #legend { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="header" class="panel">
+    <span class="dot"></span>
+    <h1>Live Weather Radar</h1>
+    <span id="frame-time">loading&hellip;</span>
+  </div>
+
+  <div id="status" class="panel"></div>
+
+  <div id="controls" class="panel">
+    <div class="row">
+      <button id="btn-play" class="primary" title="Play / pause animation">&#9654; Play</button>
+      <button id="btn-prev" title="Previous frame">&#9664;</button>
+      <button id="btn-next" title="Next frame">&#9654;</button>
+      <input id="frame-slider" type="range" min="0" max="0" value="0" step="1" />
+      <button id="btn-latest" title="Jump to latest radar frame">Latest</button>
+      <button id="btn-locate" title="Center map on my location">&#128205; My location</button>
+    </div>
+    <div class="row">
+      <label class="ctl">Layer
+        <select id="sel-layer">
+          <option value="radar" selected>Radar (precipitation)</option>
+          <option value="satellite">Satellite (infrared)</option>
+        </select>
+      </label>
+      <label class="ctl">Speed
+        <select id="sel-speed">
+          <option value="1000">Slow</option>
+          <option value="500" selected>Normal</option>
+          <option value="250">Fast</option>
+        </select>
+      </label>
+      <label class="ctl">Opacity
+        <input id="opacity-slider" type="range" min="0.1" max="1" step="0.05" value="0.75" style="width:90px; flex:none;" />
+      </label>
+      <label class="ctl">
+        <input id="chk-nowcast" type="checkbox" checked /> Include forecast
+      </label>
+    </div>
+  </div>
+
+  <div id="legend" class="panel">
+    <div>Precipitation intensity</div>
+    <div class="bar"></div>
+    <div class="labels"><span>light</span><span>heavy</span></div>
+  </div>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script>
+    "use strict";
+
+    // ---------------------------------------------------------------------
+    // Live weather radar powered by the free RainViewer API (no key needed)
+    // and OpenStreetMap basemap tiles, rendered with Leaflet.
+    // ---------------------------------------------------------------------
+
+    var RAINVIEWER_API = "https://api.rainviewer.com/public/weather-maps.json";
+    var REFRESH_MS = 5 * 60 * 1000; // radar data updates roughly every 5 minutes
+    var RADAR_COLOR_SCHEME = 4;      // "The Weather Channel" palette
+    var TILE_SIZE = 256;
+
+    var map = L.map("map", { zoomControl: true, attributionControl: true })
+      .setView([39.5, -98.35], 5); // continental US default; geolocation can re-center
+
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a> | Radar &copy; <a href="https://www.rainviewer.com/">RainViewer</a>',
+      subdomains: "abcd",
+      maxZoom: 19
+    }).addTo(map);
+
+    var state = {
+      host: "",
+      frames: [],        // combined past + nowcast frames for the active layer
+      pastCount: 0,      // frames[i] with i >= pastCount are forecast
+      index: 0,
+      playing: false,
+      timer: null,
+      layerKind: "radar",
+      opacity: 0.75,
+      speedMs: 500,
+      includeNowcast: true,
+      tileLayers: {}     // frame.path -> L.tileLayer (preloaded, opacity 0)
+    };
+
+    var el = {
+      play: document.getElementById("btn-play"),
+      prev: document.getElementById("btn-prev"),
+      next: document.getElementById("btn-next"),
+      latest: document.getElementById("btn-latest"),
+      locate: document.getElementById("btn-locate"),
+      slider: document.getElementById("frame-slider"),
+      opacity: document.getElementById("opacity-slider"),
+      layer: document.getElementById("sel-layer"),
+      speed: document.getElementById("sel-speed"),
+      nowcast: document.getElementById("chk-nowcast"),
+      time: document.getElementById("frame-time"),
+      status: document.getElementById("status")
+    };
+
+    function showStatus(msg) {
+      el.status.textContent = msg;
+      el.status.classList.add("visible");
+    }
+    function hideStatus() { el.status.classList.remove("visible"); }
+
+    function tileUrlFor(frame) {
+      if (state.layerKind === "satellite") {
+        // Satellite frames use color 0 and "0_0" options (no smoothing/snow).
+        return state.host + frame.path + "/" + TILE_SIZE + "/{z}/{x}/{y}/0/0_0.png";
+      }
+      return state.host + frame.path + "/" + TILE_SIZE + "/{z}/{x}/{y}/" + RADAR_COLOR_SCHEME + "/1_1.png";
+    }
+
+    function makeTileLayer(frame) {
+      return L.tileLayer(tileUrlFor(frame), {
+        tileSize: TILE_SIZE,
+        opacity: 0,
+        maxNativeZoom: state.layerKind === "satellite" ? 8 : 10,
+        maxZoom: 19,
+        zIndex: 400
+      });
+    }
+
+    function clearTileLayers() {
+      Object.keys(state.tileLayers).forEach(function (key) {
+        map.removeLayer(state.tileLayers[key]);
+      });
+      state.tileLayers = {};
+    }
+
+    function syncTileLayers() {
+      // Add any missing frame layers (preloaded invisible so playback is smooth)
+      state.frames.forEach(function (frame) {
+        if (!state.tileLayers[frame.path]) {
+          var layer = makeTileLayer(frame);
+          layer.addTo(map);
+          state.tileLayers[frame.path] = layer;
+        }
+      });
+      // Drop layers for frames that no longer exist
+      var valid = {};
+      state.frames.forEach(function (f) { valid[f.path] = true; });
+      Object.keys(state.tileLayers).forEach(function (key) {
+        if (!valid[key]) {
+          map.removeLayer(state.tileLayers[key]);
+          delete state.tileLayers[key];
+        }
+      });
+    }
+
+    function formatFrameTime(frame, isFuture) {
+      var d = new Date(frame.time * 1000);
+      var text = d.toLocaleString(undefined, {
+        weekday: "short", hour: "2-digit", minute: "2-digit"
+      });
+      return isFuture ? text + " (forecast)" : text;
+    }
+
+    function showFrame(index) {
+      if (!state.frames.length) return;
+      index = Math.max(0, Math.min(index, state.frames.length - 1));
+      state.index = index;
+
+      state.frames.forEach(function (frame, i) {
+        var layer = state.tileLayers[frame.path];
+        if (layer) layer.setOpacity(i === index ? state.opacity : 0);
+      });
+
+      var frame = state.frames[index];
+      var isFuture = index >= state.pastCount;
+      el.time.innerHTML = isFuture
+        ? '<span class="future">' + formatFrameTime(frame, true) + "</span>"
+        : formatFrameTime(frame, false);
+      el.slider.value = String(index);
+    }
+
+    function play() {
+      state.playing = true;
+      el.play.innerHTML = "&#10074;&#10074; Pause";
+      state.timer = setInterval(function () {
+        var next = state.index + 1;
+        if (next >= state.frames.length) next = 0;
+        showFrame(next);
+      }, state.speedMs);
+    }
+
+    function pause() {
+      state.playing = false;
+      el.play.innerHTML = "&#9654; Play";
+      if (state.timer) { clearInterval(state.timer); state.timer = null; }
+    }
+
+    function rebuildFrames(data) {
+      var frames, pastCount;
+      if (state.layerKind === "satellite") {
+        frames = (data.satellite && data.satellite.infrared) || [];
+        pastCount = frames.length;
+      } else {
+        var past = (data.radar && data.radar.past) || [];
+        var nowcast = state.includeNowcast ? ((data.radar && data.radar.nowcast) || []) : [];
+        frames = past.concat(nowcast);
+        pastCount = past.length;
+      }
+      state.host = data.host;
+      state.frames = frames;
+      state.pastCount = pastCount;
+      el.slider.max = String(Math.max(0, frames.length - 1));
+      syncTileLayers();
+    }
+
+    var lastData = null;
+
+    function loadFrames(keepPosition) {
+      return fetch(RAINVIEWER_API, { cache: "no-store" })
+        .then(function (res) {
+          if (!res.ok) throw new Error("RainViewer API returned " + res.status);
+          return res.json();
+        })
+        .then(function (data) {
+          lastData = data;
+          var wasAtEnd = state.index >= state.frames.length - 1;
+          rebuildFrames(data);
+          hideStatus();
+          if (!keepPosition || wasAtEnd) {
+            // Default position: newest *observed* radar frame
+            showFrame(state.pastCount > 0 ? state.pastCount - 1 : 0);
+          } else {
+            showFrame(Math.min(state.index, state.frames.length - 1));
+          }
+        })
+        .catch(function (err) {
+          showStatus("Could not load radar data: " + err.message + " — retrying in 30s");
+          setTimeout(function () { loadFrames(true); }, 30 * 1000);
+        });
+    }
+
+    // ------------------------------- UI wiring -------------------------------
+
+    el.play.addEventListener("click", function () {
+      if (state.playing) pause(); else play();
+    });
+
+    el.prev.addEventListener("click", function () {
+      pause();
+      showFrame(state.index === 0 ? state.frames.length - 1 : state.index - 1);
+    });
+
+    el.next.addEventListener("click", function () {
+      pause();
+      showFrame(state.index >= state.frames.length - 1 ? 0 : state.index + 1);
+    });
+
+    el.latest.addEventListener("click", function () {
+      pause();
+      showFrame(state.pastCount > 0 ? state.pastCount - 1 : 0);
+    });
+
+    el.slider.addEventListener("input", function () {
+      pause();
+      showFrame(parseInt(el.slider.value, 10));
+    });
+
+    el.opacity.addEventListener("input", function () {
+      state.opacity = parseFloat(el.opacity.value);
+      showFrame(state.index);
+    });
+
+    el.speed.addEventListener("change", function () {
+      state.speedMs = parseInt(el.speed.value, 10);
+      if (state.playing) { pause(); play(); }
+    });
+
+    el.layer.addEventListener("change", function () {
+      state.layerKind = el.layer.value;
+      clearTileLayers();
+      if (lastData) {
+        rebuildFrames(lastData);
+        showFrame(state.pastCount > 0 ? state.pastCount - 1 : 0);
+      }
+    });
+
+    el.nowcast.addEventListener("change", function () {
+      state.includeNowcast = el.nowcast.checked;
+      if (lastData) {
+        rebuildFrames(lastData);
+        showFrame(Math.min(state.index, state.frames.length - 1));
+      }
+    });
+
+    el.locate.addEventListener("click", function () {
+      if (!navigator.geolocation) {
+        showStatus("Geolocation is not available in this browser.");
+        return;
+      }
+      showStatus("Locating…");
+      navigator.geolocation.getCurrentPosition(
+        function (pos) {
+          hideStatus();
+          map.setView([pos.coords.latitude, pos.coords.longitude], 8);
+        },
+        function (err) {
+          // Geolocation requires a secure context; tailscale serve provides HTTPS.
+          showStatus("Location failed: " + err.message);
+        },
+        { enableHighAccuracy: false, timeout: 10000 }
+      );
+    });
+
+    // ------------------------------- Startup -------------------------------
+
+    loadFrames(false).then(function () {
+      if (state.frames.length) play();
+    });
+    setInterval(function () { loadFrames(true); }, REFRESH_MS);
+  </script>
+</body>
+</html>

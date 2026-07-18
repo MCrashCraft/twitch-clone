@@ -1,0 +1,97 @@
+# Live Weather Radar over Tailscale
+
+A self-contained, single-file web app that shows an **animated live weather
+radar** (precipitation, past 2 hours + short-term forecast) in any browser,
+designed to be shared privately across your devices with **Tailscale**.
+
+- **No API keys** — radar data comes from the free
+  [RainViewer](https://www.rainviewer.com/api.html) public API, basemap from
+  OpenStreetMap/CARTO, rendered with [Leaflet](https://leafletjs.com/).
+- **No build step** — it's one `index.html`. Any static file server works.
+- **Live** — radar frames auto-refresh every 5 minutes; animation includes a
+  nowcast (forecast) tail you can toggle off.
+
+## Features
+
+- Animated radar loop with play/pause, frame stepping, scrubber, and speed
+  control
+- Satellite infrared layer as an alternative to precipitation radar
+- Opacity slider and precipitation-intensity legend
+- "My location" button (works over Tailscale HTTPS — geolocation requires a
+  secure context, which `tailscale serve` gives you for free)
+- Dark UI that matches the rest of this repo's Twitch-style theme
+
+## Quick start (local only)
+
+```bash
+cd weather-radar
+./serve.sh
+# open http://localhost:8777
+```
+
+## Share it over your Tailscale network
+
+[Tailscale](https://tailscale.com/) creates a private WireGuard mesh ("tailnet")
+between your devices. `tailscale serve` proxies a local port onto your tailnet
+with automatic HTTPS.
+
+1. **Install Tailscale** on the machine that will host the radar
+   ([download](https://tailscale.com/download)) and log in:
+
+   ```bash
+   sudo tailscale up
+   ```
+
+2. **Start the radar and expose it** in one step:
+
+   ```bash
+   cd weather-radar
+   ./serve.sh --tailnet
+   ```
+
+   This runs a static server on port `8777` and calls
+   `tailscale serve --bg 8777`, which prints an HTTPS URL like:
+
+   ```
+   https://your-machine.your-tailnet.ts.net/
+   ```
+
+3. **Open that URL from any device on your tailnet** — phone, laptop, TV
+   browser. Nothing is exposed to the public internet, no port forwarding, and
+   TLS certificates are handled automatically by Tailscale (make sure
+   [MagicDNS and HTTPS](https://tailscale.com/kb/1153/enabling-https) are
+   enabled in your tailnet's admin console → DNS settings).
+
+To stop sharing: `tailscale serve --https=443 off` (the script also cleans up
+on exit).
+
+### Optional: share with people *outside* your tailnet
+
+Tailscale **Funnel** publishes the same URL to the public internet:
+
+```bash
+./serve.sh --funnel
+```
+
+Funnel must be allowed for your node in the Tailscale admin console
+([docs](https://tailscale.com/kb/1223/funnel)). Use with care — the page is
+harmless, but the URL becomes publicly reachable.
+
+## Manual setup (without the script)
+
+Any static server + `tailscale serve` works:
+
+```bash
+cd weather-radar
+python3 -m http.server 8777 &        # or: npx serve -l 8777
+tailscale serve --bg 8777
+tailscale serve status               # shows the HTTPS URL
+```
+
+## Notes
+
+- The page fetches radar tiles directly from `tilecache.rainviewer.com` in the
+  *viewer's* browser, so the host machine uses almost no bandwidth or CPU.
+- Radar coverage is worldwide where weather radars exist (US, Europe, AU, JP,
+  and more). The satellite infrared layer is global.
+- Default view is the continental US; use **My location** or just pan/zoom.
