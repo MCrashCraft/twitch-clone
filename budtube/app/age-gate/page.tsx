@@ -1,6 +1,6 @@
 import Image from "next/image";
 import type { Metadata } from "next";
-import { confirmAge } from "@/actions/age-gate";
+import { AgeGateForm } from "@/components/age-gate-form";
 
 export const metadata: Metadata = { title: "Are you 21+?" };
 
@@ -30,17 +30,13 @@ export default function AgeGatePage({
         <p className="mt-6 text-sm text-zinc-300">
           This site features cannabis-themed content and is intended for adults{" "}
           <span className="font-semibold text-bud-primary">21 and older</span>{" "}
-          in places where cannabis is legal.
+          in places where cannabis is legal. Verify your date of birth to
+          enter.
         </p>
-        <form action={confirmAge} className="mt-6 space-y-3">
-          <input type="hidden" name="next" value={next} />
-          <button type="submit" className="btn-primary w-full">
-            I&apos;m 21 or older — let me in
-          </button>
-        </form>
+        <AgeGateForm next={next} />
         <a
           href="https://www.google.com"
-          className="mt-3 block text-sm text-bud-muted hover:text-zinc-300"
+          className="mt-4 block text-sm text-bud-muted hover:text-zinc-300"
         >
           I&apos;m under 21 — take me elsewhere
         </a>

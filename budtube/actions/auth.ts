@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { createSession, destroySession } from "@/lib/auth";
+import { parseBirthDate, isOfAge, MIN_AGE } from "@/lib/age";
 
 export type AuthFormState = { error: string } | undefined;
 
@@ -24,6 +25,7 @@ export async function signUp(
   const username = String(formData.get("username") ?? "").trim().toLowerCase();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
+  const birthDate = parseBirthDate(String(formData.get("dob") ?? ""));
   const next = safeNext(formData.get("next"));
 
   if (!USERNAME_RE.test(username)) {
@@ -34,6 +36,12 @@ export async function signUp(
   }
   if (password.length < 8) {
     return { error: "Password must be at least 8 characters." };
+  }
+  if (!birthDate) {
+    return { error: "Enter your date of birth." };
+  }
+  if (!isOfAge(birthDate)) {
+    return { error: `You must be ${MIN_AGE} or older to join BudTube.` };
   }
 
   const existing = await db.user.findFirst({
@@ -51,7 +59,7 @@ export async function signUp(
 
   const passwordHash = await bcrypt.hash(password, 10);
   const user = await db.user.create({
-    data: { username, email, passwordHash },
+    data: { username, email, passwordHash, birthDate },
   });
 
   await createSession(user);

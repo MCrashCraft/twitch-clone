@@ -13,7 +13,8 @@ model User {
   email        String   @unique
   passwordHash String
   bio          String?
-  role         String   @default("USER") // "USER" | "ADMIN" (SQLite has no enums)
+  birthDate    DateTime?
+  role         String    @default("USER") // "USER" | "ADMIN" (SQLite has no enums)
   createdAt    DateTime @default(now())
 
   videos        Video[]

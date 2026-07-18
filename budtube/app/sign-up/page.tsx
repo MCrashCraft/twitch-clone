@@ -42,6 +42,12 @@ export default async function SignUpPage({
               autoComplete: "email",
             },
             {
+              name: "dob",
+              label: "Date of birth (must be 21+)",
+              type: "date",
+              autoComplete: "bday",
+            },
+            {
               name: "password",
               label: "Password (8+ characters)",
               type: "password",
