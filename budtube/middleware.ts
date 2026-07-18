@@ -3,7 +3,7 @@ import { verifySessionToken, SESSION_COOKIE } from "@/lib/session";
 
 const AGE_COOKIE = "budtube_age_ok";
 const AGE_EXEMPT_PATHS = ["/age-gate"];
-const AUTH_REQUIRED_PATHS = ["/upload", "/dashboard"];
+const AUTH_REQUIRED_PATHS = ["/upload", "/dashboard", "/settings", "/admin"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

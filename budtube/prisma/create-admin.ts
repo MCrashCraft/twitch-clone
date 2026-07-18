@@ -23,10 +23,12 @@ async function main() {
 
   const passwordHash = await bcrypt.hash(password, 10);
 
+  // OWNER is the main admin: full staff powers plus role management,
+  // and no one can demote it.
   const admin = await db.user.upsert({
     where: { username },
-    update: { email, passwordHash, role: "ADMIN" },
-    create: { username, email, passwordHash, role: "ADMIN" },
+    update: { email, passwordHash, role: "OWNER" },
+    create: { username, email, passwordHash, role: "OWNER" },
   });
 
   console.log(`Admin ready: @${admin.username} <${admin.email}> (role: ${admin.role})`);

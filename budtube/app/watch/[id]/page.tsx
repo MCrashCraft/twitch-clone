@@ -8,6 +8,7 @@ import { LikeButton } from "@/components/like-button";
 import { SubscribeButton } from "@/components/subscribe-button";
 import { CommentSection } from "@/components/comment-section";
 import { DeleteVideoButton } from "@/components/delete-video-button";
+import { isStaff } from "@/lib/roles";
 
 export async function generateMetadata({
   params,
@@ -103,7 +104,7 @@ export default async function WatchPage({
   }
 
   const isOwnVideo = session?.userId === video.user.id;
-  const canDelete = isOwnVideo || viewer?.role === "ADMIN";
+  const canDelete = isOwnVideo || isStaff(viewer?.role);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_320px]">

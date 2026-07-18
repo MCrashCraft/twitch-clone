@@ -14,7 +14,8 @@ model User {
   passwordHash String
   bio          String?
   birthDate    DateTime?
-  role         String    @default("USER") // "USER" | "ADMIN" (SQLite has no enums)
+  idVerified   Boolean   @default(false)
+  role         String    @default("USER") // "USER" | "ADMIN" | "OWNER" (SQLite has no enums)
   createdAt    DateTime @default(now())
 
   videos        Video[]
@@ -69,6 +70,18 @@ model VideoLike {
   video   Video  @relation(fields: [videoId], references: [id], onDelete: Cascade)
 
   @@unique([userId, videoId])
+}
+
+// One row per Didit verification session we create — counted per month to
+// stay under the free-tier API cap.
+model VerificationSession {
+  id        String   @id @default(cuid())
+  sessionId String   @unique
+  status    String   @default("created")
+  userId    String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 model Subscription {

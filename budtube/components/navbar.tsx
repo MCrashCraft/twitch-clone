@@ -44,6 +44,20 @@ export async function Navbar() {
               >
                 Dashboard
               </Link>
+              <Link
+                href="/settings"
+                className="hidden text-sm text-bud-muted hover:text-zinc-200 sm:block"
+              >
+                Settings
+              </Link>
+              {user.role === "OWNER" && (
+                <Link
+                  href="/admin"
+                  className="hidden text-sm font-medium text-bud-accent hover:text-purple-300 sm:block"
+                >
+                  Admin
+                </Link>
+              )}
               <form action={signOut}>
                 <button type="submit" className="btn-secondary">
                   Sign out

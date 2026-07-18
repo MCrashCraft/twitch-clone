@@ -18,17 +18,36 @@ npm run dev         # http://localhost:3420
 
 Demo accounts (all with password `password420`): `blazeitplays`, `couchlocked`, `sativa_speedruns`.
 
-## Admin account
+## Admin & owner accounts
 
 Copy `.env.example` to `.env` and fill in `ADMIN_PASSWORD` — the `.env`
 file is gitignored so secrets stay out of the repo. Then create the admin:
 
 ```bash
-npm run db:admin   # creates/updates the ADMIN_USERNAME account with role ADMIN
+npm run db:admin   # creates/updates the ADMIN_USERNAME account with role OWNER
 ```
 
-Admins (staff) can delete **any** video from its watch page; regular users
-can delete their own videos from the watch page or their dashboard.
+The owner is the main admin: it has all staff powers, can never be
+demoted, and gets the **/admin** panel to promote or demote other users
+to Admin. Staff (Admin or Owner) can delete **any** video from its watch
+page; regular users can delete their own videos from the watch page or
+their dashboard.
+
+## ID verification (Didit)
+
+The 21+ age gate supports real ID-document verification through
+[Didit](https://docs.didit.me) (free tier: 500 checks/month). Set
+`DIDIT_API_KEY` and `DIDIT_WORKFLOW_ID` in `.env` to enable it; visitors
+then verify with an ID scan (extracted age must be 21+), with
+date-of-birth entry as fallback. `DIDIT_MONTHLY_CAP` (default 450) hard-caps
+API usage below the free tier — past the cap the gate falls back to DOB
+entry until the month resets. Signed-in users who complete an ID check
+get an "ID verified" badge; usage is shown on the /admin panel.
+
+## User settings
+
+Signed-in users can change their email, channel bio, and password at
+**/settings**.
 
 ## Features
 
