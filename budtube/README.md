@@ -44,6 +44,32 @@ API usage below the free tier — past the cap the gate falls back to DOB
 entry until the month resets. Signed-in users who complete an ID check
 get an "ID verified" badge; usage is shown on the /admin panel.
 
+## Docker & Unraid
+
+A published image is built by GitHub Actions on every push:
+`ghcr.io/mcrashcraft/budtube:latest`. Everything persistent (SQLite
+database + uploaded videos) lives on the `/data` volume.
+
+**Unraid:** Docker tab → Add Container → set Repository to
+`ghcr.io/mcrashcraft/budtube:latest`, map port `3420`, map a path from
+`/mnt/user/appdata/budtube` to `/data`, and set the `ADMIN_PASSWORD` and
+`SESSION_SECRET` variables. A ready-made template is in
+[`unraid/budtube-template.xml`](unraid/budtube-template.xml) — drop it in
+`/boot/config/plugins/dockerMan/templates-user/` on your flash drive and
+it appears in Unraid's template list.
+
+**docker-compose:** see [`docker-compose.yml`](docker-compose.yml) —
+`docker compose up -d` and open port 3420.
+
+**Build locally:** `docker build -t budtube .` (behind a TLS-intercepting
+proxy, add `--secret id=extra_ca,src=/path/to/proxy-ca.pem`).
+
+On every start the container runs `prisma db push` (creates/updates the
+schema) and ensures the owner account from `ADMIN_USERNAME`/`ADMIN_PASSWORD`.
+Environment variables: `ADMIN_PASSWORD` (required), `SESSION_SECRET`
+(recommended), `ADMIN_USERNAME`, `ADMIN_EMAIL`, `DIDIT_API_KEY`,
+`DIDIT_WORKFLOW_ID`, `DIDIT_MONTHLY_CAP`, `PORT`.
+
 ## User settings
 
 Signed-in users can change their email, channel bio, and password at

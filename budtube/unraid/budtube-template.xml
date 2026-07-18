@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>BudTube</Name>
+  <Repository>ghcr.io/mcrashcraft/budtube:latest</Repository>
+  <Registry>https://ghcr.io</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/MCrashCraft/twitch-clone</Support>
+  <Project>https://github.com/MCrashCraft/twitch-clone</Project>
+  <Overview>BudTube — a self-contained, 420-friendly gaming video platform (21+). YouTube-style uploads, channels, likes, comments, subscriptions, an owner/admin system, and an age gate with optional Didit ID verification. SQLite database and video files live on the /data volume.</Overview>
+  <Category>MediaServer:Video</Category>
+  <WebUI>http://[IP]:[PORT:3420]/</WebUI>
+  <Icon>https://raw.githubusercontent.com/MCrashCraft/twitch-clone/claude/cannabis-gaming-youtube-clone-48nd9t/budtube/public/logo.svg</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <DonateText/>
+  <DonateLink/>
+  <Config Name="WebUI Port" Target="3420" Default="3420" Mode="tcp" Description="Port for the BudTube web interface" Type="Port" Display="always" Required="true" Mask="false">3420</Config>
+  <Config Name="Data (database + videos)" Target="/data" Default="/mnt/user/appdata/budtube" Mode="rw" Description="Persistent storage for the SQLite database and uploaded videos/thumbnails" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/budtube</Config>
+  <Config Name="Admin (owner) password" Target="ADMIN_PASSWORD" Default="" Mode="" Description="Password for the owner account (created/updated on every start). 8+ characters." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="Session secret" Target="SESSION_SECRET" Default="" Mode="" Description="Random string used to sign login cookies. Set once and keep it stable." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="Admin username" Target="ADMIN_USERNAME" Default="mcrashcraft" Mode="" Description="Owner account username (lowercase letters, digits, underscore)" Type="Variable" Display="advanced" Required="false" Mask="false">mcrashcraft</Config>
+  <Config Name="Admin email" Target="ADMIN_EMAIL" Default="support@mcrashcraft.com" Mode="" Description="Owner account email" Type="Variable" Display="advanced" Required="false" Mask="false">support@mcrashcraft.com</Config>
+  <Config Name="Didit API key" Target="DIDIT_API_KEY" Default="" Mode="" Description="Optional: enables ID-document age verification via didit.me (free tier 500/mo)" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Didit workflow ID" Target="DIDIT_WORKFLOW_ID" Default="" Mode="" Description="Didit workflow UUID from your dashboard" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Didit monthly cap" Target="DIDIT_MONTHLY_CAP" Default="450" Mode="" Description="Hard cap on Didit checks per month (stays under the 500 free tier)" Type="Variable" Display="advanced" Required="false" Mask="false">450</Config>
+</Container>

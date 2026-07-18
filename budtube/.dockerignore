@@ -1,0 +1,9 @@
+node_modules
+.next
+uploads
+prisma/dev.db*
+.env
+*.log
+README.md
+unraid
+docker-compose.yml

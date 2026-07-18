@@ -1,7 +1,9 @@
 import path from "path";
 import fs from "fs/promises";
 
-export const UPLOAD_DIR = path.join(process.cwd(), "uploads");
+// Overridable so Docker/Unraid can point it at a persistent volume.
+export const UPLOAD_DIR =
+  process.env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads");
 
 export const VIDEO_TYPES: Record<string, string> = {
   "video/mp4": ".mp4",

@@ -1,0 +1,23 @@
+services:
+  budtube:
+    image: ghcr.io/mcrashcraft/budtube:latest
+    # Or build locally instead of pulling:
+    # build: .
+    container_name: budtube
+    ports:
+      - "3420:3420"
+    volumes:
+      - ./data:/data
+    environment:
+      # Required: owner (main admin) account password
+      ADMIN_PASSWORD: "change-me"
+      # Strongly recommended: random string for signing session cookies
+      SESSION_SECRET: "change-me-too"
+      # Optional overrides
+      # ADMIN_USERNAME: "mcrashcraft"
+      # ADMIN_EMAIL: "support@mcrashcraft.com"
+      # Optional: Didit ID verification (age gate falls back to DOB without it)
+      # DIDIT_API_KEY: ""
+      # DIDIT_WORKFLOW_ID: ""
+      # DIDIT_MONTHLY_CAP: "450"
+    restart: unless-stopped
