@@ -124,8 +124,13 @@
     <div class="sub">Satellite heat detections, past day (NASA VIIRS)</div>
     <label><input id="chk-smoke" type="checkbox" /> Smoke / aerosol</label>
     <div class="sub">Aerosol optical depth, daily (NASA MODIS)</div>
-    <label><input id="chk-aqi" type="checkbox" checked /> Click map for conditions</label>
-    <div class="sub">Live air quality + next-24h storm, wind &amp; AQI outlook at any point (Open-Meteo)</div>
+    <label><input id="chk-aqi" type="checkbox" checked /> Click map for point report</label>
+    <div class="sub">Current weather, air quality &amp; next-24h storm / wind / AQI outlook at any point on Earth (Open-Meteo)</div>
+    <h2 style="margin-top:10px">&#127757; Global</h2>
+    <label><input id="chk-quakes" type="checkbox" checked /> Earthquakes (24 h)</label>
+    <div class="sub">USGS worldwide, sized &amp; colored by magnitude</div>
+    <label><input id="chk-gdacs" type="checkbox" checked /> Disaster alerts</label>
+    <div class="sub">GDACS: tropical cyclones &amp; forecast tracks, floods, volcanoes, wildfires, droughts &mdash; green/orange/red severity</div>
     <h2 style="margin-top:10px">&#128302; Predictions
       <select id="sel-outlook-day" style="float:right; font-size:11px; padding:2px 4px;">
         <option value="1" selected>Day 1</option>
@@ -166,6 +171,12 @@
           <option value="satellite">Satellite (infrared)</option>
         </select>
       </label>
+      <label class="ctl">Map
+        <select id="sel-basemap">
+          <option value="dark" selected>Dark</option>
+          <option value="space">Earth from space</option>
+        </select>
+      </label>
       <label class="ctl">Speed
         <select id="sel-speed">
           <option value="1000">Slow</option>
@@ -204,14 +215,34 @@
 
     // preferCanvas: hundreds of alert/outlook polygons as SVG nodes crash
     // mobile browsers on zoom; canvas rendering keeps them cheap.
-    var map = L.map("map", { zoomControl: true, attributionControl: true, preferCanvas: true })
-      .setView([39.5, -98.35], 5); // continental US default; geolocation can re-center
+    var map = L.map("map", { zoomControl: true, attributionControl: true, preferCanvas: true, minZoom: 2, worldCopyJump: true })
+      .setView([39.5, -98.35], 5); // continental US default; zoom out for the whole globe
 
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a> | Radar &copy; <a href="https://www.rainviewer.com/">RainViewer</a>',
-      subdomains: "abcd",
-      maxZoom: 19
-    }).addTo(map);
+    var ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a> | <a href="https://earthdata.nasa.gov/gibs">NASA GIBS</a> | Radar &copy; <a href="https://www.rainviewer.com/">RainViewer</a>';
+
+    function gibsDailyDate() {
+      // Yesterday UTC: today's global satellite mosaic is still being assembled.
+      var d = new Date(Date.now() - 86400000);
+      return d.toISOString().slice(0, 10);
+    }
+
+    var basemaps = {
+      dark: L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+        attribution: ATTR, subdomains: "abcd", maxZoom: 19, zIndex: 100
+      }),
+      // "Earth from space": NASA VIIRS true-color imagery of the whole planet,
+      // updated daily — real clouds, smoke plumes and snow as seen from orbit.
+      space: L.layerGroup([
+        L.tileLayer("https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_CorrectedReflectance_TrueColor/default/" +
+                    gibsDailyDate() + "/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg", {
+          attribution: ATTR, maxNativeZoom: 9, maxZoom: 19, zIndex: 100
+        }),
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png", {
+          subdomains: "abcd", maxZoom: 19, zIndex: 150, opacity: 0.9
+        })
+      ])
+    };
+    var currentBase = basemaps.dark.addTo(map);
 
     var state = {
       host: "",
@@ -462,9 +493,18 @@
     // ------------------------------- Hazards -------------------------------
     // NWS active alerts (US), NASA GIBS fire & aerosol overlays, Open-Meteo AQI.
 
-    var NWS_ALERTS_API = "https://api.weather.gov/alerts/active?status=actual&message_type=alert,update";
+    // NOAA's watch/warn/advisory map service returns zone-resolved polygons
+    // ALREADY simplified server-side (maxAllowableOffset), so the browser never
+    // holds full-resolution county geometry — this is what keeps zooming cheap.
+    var WWA_BASE = "https://mapservices.weather.noaa.gov/eventdriven/rest/services/WWA/watch_warn_adv/MapServer/";
+    var WWA_FIELDS = "prod_type,expiration,onset,url";
     var GIBS_WMS = "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi";
     var ALERTS_REFRESH_MS = 150 * 1000;
+
+    function wwaQuery(layerId, offset) {
+      return WWA_BASE + layerId + "/query?where=1%3D1&outFields=" + WWA_FIELDS +
+             "&f=geojson&maxAllowableOffset=" + offset;
+    }
 
     var hz = {
       alerts: document.getElementById("chk-alerts"),
@@ -496,26 +536,23 @@
       return "#b06bff";
     }
 
-    // Zone-based alerts (watches, air quality, red flag…) carry no polygon of
-    // their own; fetch the referenced zone shapes for the important ones.
-    var ZONE_EVENTS = /tornado|thunderstorm watch|red flag|fire weather|smoke|air quality|air stagnation|heat|hurricane|tropical|flood watch|blizzard|winter storm/i;
-    var ZONE_FETCH_BUDGET = 150; // max zone geometry fetches per refresh (cached across refreshes)
-    var zoneCache = {};
-
-    function zoneGeometry(url) {
-      if (!zoneCache[url]) {
-        zoneCache[url] = fetch(url, { headers: { Accept: "application/geo+json" } })
-          .then(function (r) { return r.ok ? r.json() : null; })
-          .then(function (j) { return (j && j.geometry) || null; })
-          .catch(function () { return null; });
-      }
-      return zoneCache[url];
+    function fmtWhen(iso) {
+      if (!iso || iso.trim().length < 10) return "?";
+      return new Date(iso).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" });
     }
+
+    function alertBasicHtml(p) {
+      var ev = (p.prod_type || "Alert").trim();
+      return '<div class="ev" style="color:' + alertColor(ev) + '">' + ev + "</div>" +
+             '<div class="meta">' + fmtWhen(p.onset) + " &ndash; " + fmtWhen(p.expiration) + "</div>";
+    }
+
+    var alertDetails = {}; // CAP url -> detail html (fetched lazily on popup open)
 
     var alertsLayer = L.geoJSON(null, {
       smoothFactor: 2,
       style: function (f) {
-        var ev = f.properties.event || "";
+        var ev = f.properties.prod_type || "";
         var isTornadoWarning = /tornado warning/i.test(ev);
         return {
           color: alertColor(ev),
@@ -525,55 +562,42 @@
       },
       onEachFeature: function (f, layer) {
         var p = f.properties;
-        var fmt = function (iso) {
-          return iso ? new Date(iso).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }) : "?";
-        };
-        var desc = (p.description || "").slice(0, 400);
-        layer.bindPopup(
-          '<div class="ev" style="color:' + alertColor(p.event || "") + '">' + (p.event || "Alert") + "</div>" +
-          '<div class="meta">' + (p.severity && p.severity !== "Unknown" ? p.severity + " &middot; " : "") + "until " + fmt(p.ends || p.expires) + "<br>" +
-          ((p.areaDesc || "").slice(0, 160)) + "</div>" +
-          '<div class="desc">' + desc + (desc.length === 400 ? "&hellip;" : "") + "</div>",
-          { maxWidth: 320 }
-        );
+        layer.bindPopup(alertBasicHtml(p) + '<div class="desc meta">Loading details&hellip;</div>', { maxWidth: 320 });
+        layer.on("popupopen", function () {
+          var url = (p.url || "").trim();
+          if (url.length < 10) { layer.setPopupContent(alertBasicHtml(p)); return; }
+          if (alertDetails[url]) { layer.setPopupContent(alertBasicHtml(p) + alertDetails[url]); return; }
+          fetch(url, { headers: { Accept: "application/geo+json" } })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              var dp = (d && d.properties) || {};
+              var desc = (dp.description || "").slice(0, 500);
+              alertDetails[url] =
+                '<div class="meta">' + (dp.severity && dp.severity !== "Unknown" ? dp.severity + " &middot; " : "") +
+                ((dp.areaDesc || "").slice(0, 160)) + "</div>" +
+                '<div class="desc">' + desc + (desc.length === 500 ? "&hellip;" : "") + "</div>";
+              layer.setPopupContent(alertBasicHtml(p) + alertDetails[url]);
+            })
+            .catch(function () { layer.setPopupContent(alertBasicHtml(p)); });
+        });
       }
     });
 
     function loadAlerts() {
       if (!hz.alerts.checked) return;
-      fetch(NWS_ALERTS_API, { headers: { Accept: "application/geo+json" } })
-        .then(function (r) {
-          if (!r.ok) throw new Error("NWS API " + r.status);
-          return r.json();
+      // Zone alerts (watches/advisories/air quality) coarser, storm warnings finer.
+      Promise.all([
+        fetch(wwaQuery(1, 0.05)).then(function (r) { return r.json(); }),
+        fetch(wwaQuery(0, 0.01)).then(function (r) { return r.json(); })
+      ])
+        .then(function (results) {
+          var zones = results[0].features || [], warnings = results[1].features || [];
+          alertsLayer.clearLayers();
+          alertsLayer.addData({ type: "FeatureCollection", features: zones });
+          alertsLayer.addData({ type: "FeatureCollection", features: warnings }); // warnings drawn on top
+          hz.count.textContent = "(" + (zones.length + warnings.length) + " active)";
         })
-        .then(function (data) {
-          var features = data.features || [];
-          var direct = [], zoneJobs = [], budget = ZONE_FETCH_BUDGET;
-
-          features.forEach(function (f) {
-            if (f.geometry) { direct.push(f); return; }
-            if (!ZONE_EVENTS.test(f.properties.event || "")) return;
-            (f.properties.affectedZones || []).slice(0, 8).forEach(function (zoneUrl) {
-              if (!zoneCache[zoneUrl]) {
-                if (budget <= 0) return;
-                budget--;
-              }
-              zoneJobs.push(zoneGeometry(zoneUrl).then(function (geom) {
-                return geom ? { type: "Feature", geometry: geom, properties: f.properties } : null;
-              }));
-            });
-          });
-
-          return Promise.all(zoneJobs).then(function (zoned) {
-            var all = direct.concat(zoned.filter(Boolean));
-            alertsLayer.clearLayers();
-            alertsLayer.addData({ type: "FeatureCollection", features: all });
-            hz.count.textContent = "(" + features.length + " active)";
-          });
-        })
-        .catch(function (err) {
-          hz.count.textContent = "(unavailable)";
-        });
+        .catch(function () { hz.count.textContent = "(unavailable)"; });
     }
 
     function gibsWmsLayer(layerName, opacity, zIndex) {
@@ -598,6 +622,101 @@
     });
     hz.smoke.addEventListener("change", function () {
       if (hz.smoke.checked) smokeLayer.addTo(map); else map.removeLayer(smokeLayer);
+    });
+
+    // ------------------------------ Global hazards ------------------------------
+
+    hz.quakes = document.getElementById("chk-quakes");
+    hz.gdacs = document.getElementById("chk-gdacs");
+    document.getElementById("sel-basemap").addEventListener("change", function (e) {
+      map.removeLayer(currentBase);
+      currentBase = basemaps[e.target.value].addTo(map);
+    });
+
+    function magColor(m) {
+      if (m < 3) return "#9e9e9e";
+      if (m < 4.5) return "#ffd24d";
+      if (m < 6) return "#ff9800";
+      if (m < 7) return "#f44336";
+      return "#d500f9";
+    }
+
+    var quakeGroup = L.layerGroup().addTo(map);
+    function loadQuakes() {
+      if (!hz.quakes.checked) return;
+      fetch("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson")
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          quakeGroup.clearLayers();
+          (d.features || []).forEach(function (f) {
+            var m = f.properties.mag || 0, c = f.geometry.coordinates;
+            L.circleMarker([c[1], c[0]], {
+              radius: Math.max(3, 2 + m * 2.2),
+              color: magColor(m), weight: 1.5, fillColor: magColor(m), fillOpacity: 0.5
+            }).bindPopup(
+              '<div class="ev" style="color:' + magColor(m) + '">M ' + m.toFixed(1) + " earthquake</div>" +
+              '<div class="meta">' + (f.properties.place || "") + "<br>" +
+              "Depth " + Math.round(c[2]) + " km &middot; " +
+              new Date(f.properties.time).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }) + "<br>" +
+              '<a href="' + f.properties.url + '" target="_blank" rel="noopener">USGS details</a></div>',
+              { maxWidth: 260 }
+            ).addTo(quakeGroup);
+          });
+        })
+        .catch(function () { /* retry on next interval */ });
+    }
+    hz.quakes.addEventListener("change", function () {
+      if (hz.quakes.checked) { quakeGroup.addTo(map); loadQuakes(); }
+      else map.removeLayer(quakeGroup);
+    });
+
+    var GDACS_TYPES = {
+      EQ: "Earthquake", TC: "Tropical cyclone", FL: "Flood", VO: "Volcanic activity",
+      WF: "Wildfire", DR: "Drought", TS: "Tsunami"
+    };
+    var GDACS_COLORS = { Green: "#4caf50", Orange: "#ff9800", Red: "#f44336" };
+
+    var gdacsGroup = L.layerGroup().addTo(map);
+    function loadGdacs() {
+      if (!hz.gdacs.checked) return;
+      fetch("https://www.gdacs.org/gdacsapi/api/events/geteventlist/MAP")
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          gdacsGroup.clearLayers();
+          L.geoJSON(d, {
+            smoothFactor: 2,
+            pointToLayer: function (f, latlng) {
+              var col = GDACS_COLORS[f.properties.alertlevel] || "#9e9e9e";
+              return L.circleMarker(latlng, {
+                radius: 5 + Math.min(4, (f.properties.alertscore || 0)),
+                color: col, weight: 2, fillColor: col, fillOpacity: 0.55
+              });
+            },
+            style: function (f) {
+              var col = GDACS_COLORS[f.properties.alertlevel] || "#9e9e9e";
+              return f.geometry.type === "LineString"
+                ? { color: col, weight: 2.5, dashArray: "6 4" } // cyclone forecast track
+                : { color: col, weight: 1.5, fillColor: col, fillOpacity: 0.12 };
+            },
+            onEachFeature: function (f, layer) {
+              var p = f.properties;
+              var col = GDACS_COLORS[p.alertlevel] || "#9e9e9e";
+              layer.bindPopup(
+                '<div class="ev" style="color:' + col + '">' + (GDACS_TYPES[p.eventtype] || p.eventtype) +
+                " &middot; " + (p.alertlevel || "") + " alert</div>" +
+                '<div style="margin:4px 0">' + (p.name || p.description || "") + "</div>" +
+                '<div class="meta">' + (p.country || "") + "<br>" + fmtWhen(p.fromdate) + " &ndash; " + fmtWhen(p.todate) + "<br>" +
+                '<a href="' + ((p.url || {}).report || "#") + '" target="_blank" rel="noopener">GDACS report</a></div>',
+                { maxWidth: 300 }
+              );
+            }
+          }).addTo(gdacsGroup);
+        })
+        .catch(function () { /* retry on next interval */ });
+    }
+    hz.gdacs.addEventListener("change", function () {
+      if (hz.gdacs.checked) { gdacsGroup.addTo(map); loadGdacs(); }
+      else map.removeLayer(gdacsGroup);
     });
 
     // --------------------------- Outlooks (predictions) ---------------------------
@@ -696,30 +815,55 @@
       return "high";
     }
 
+    var WMO_CODES = {
+      0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Overcast", 45: "Fog", 48: "Icy fog",
+      51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle", 56: "Freezing drizzle", 57: "Freezing drizzle",
+      61: "Light rain", 63: "Rain", 65: "Heavy rain", 66: "Freezing rain", 67: "Freezing rain",
+      71: "Light snow", 73: "Snow", 75: "Heavy snow", 77: "Snow grains",
+      80: "Light showers", 81: "Showers", 82: "Violent showers", 85: "Snow showers", 86: "Snow showers",
+      95: "Thunderstorm", 96: "Thunderstorm w/ hail", 99: "Thunderstorm w/ heavy hail"
+    };
+
     map.on("click", function (e) {
       if (!hz.aqi.checked) return;
       var lat = e.latlng.lat.toFixed(3), lon = e.latlng.lng.toFixed(3);
-      var popup = L.popup({ maxWidth: 280 }).setLatLng(e.latlng)
-        .setContent('<div class="meta">Fetching conditions &amp; outlook&hellip;</div>').openOn(map);
+      var popup = L.popup({ maxWidth: 300 }).setLatLng(e.latlng)
+        .setContent('<div class="meta">Building point report&hellip;</div>').openOn(map);
 
       var aqReq = fetch("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + lat +
             "&longitude=" + lon + "&current=us_aqi,pm2_5,pm10,ozone&hourly=us_aqi&forecast_days=1")
         .then(function (r) { return r.json(); });
       var wxReq = fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon +
-            "&hourly=cape,wind_gusts_10m,precipitation_probability&forecast_days=1")
+            "&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,weather_code" +
+            "&hourly=cape,wind_gusts_10m,precipitation_probability,uv_index" +
+            "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&forecast_days=1&timezone=auto")
         .then(function (r) { return r.json(); });
+
+      function maxOf(arr, fallback) {
+        var vals = (arr || []).filter(function (v) { return v != null; });
+        return vals.length ? Math.max.apply(null, vals) : fallback;
+      }
 
       Promise.all([aqReq, wxReq])
         .then(function (results) {
           var aq = results[0] || {}, wx = results[1] || {};
-          var c = aq.current || {};
           var html = "";
 
+          var cw = wx.current || {};
+          if (cw.temperature_2m != null) {
+            html += '<div class="ev">Now</div>' +
+              '<div class="meta">' + Math.round(cw.temperature_2m) + "&deg;C (feels " + Math.round(cw.apparent_temperature) + "&deg;) &middot; " +
+              (WMO_CODES[cw.weather_code] || "") + "<br>" +
+              "Wind " + Math.round(cw.wind_speed_10m) + " gusting " + Math.round(cw.wind_gusts_10m) + " km/h &middot; " +
+              "Humidity " + cw.relative_humidity_2m + "%</div>";
+          }
+
+          var c = aq.current || {};
           if (c.us_aqi != null) {
             var lvl = AQI_LEVELS.find(function (l) { return c.us_aqi <= l[0]; });
-            var maxAqi = Math.max.apply(null, ((aq.hourly || {}).us_aqi || [c.us_aqi]).filter(function (v) { return v != null; }));
+            var maxAqi = maxOf((aq.hourly || {}).us_aqi, c.us_aqi);
             var maxLvl = AQI_LEVELS.find(function (l) { return maxAqi <= l[0]; });
-            html += '<div class="ev">Air quality</div>' +
+            html += '<div class="ev" style="margin-top:8px">Air quality</div>' +
               '<div style="margin:5px 0"><span class="aqi-chip" style="background:' + lvl[2] + '">AQI ' + c.us_aqi + "</span> " + lvl[1] + "</div>" +
               '<div class="meta">PM2.5: ' + c.pm2_5 + " &middot; PM10: " + c.pm10 + " &middot; O&#8323;: " + c.ozone + " &micro;g/m&sup3;<br>" +
               "Next 24 h peak: <b style=\"color:" + maxLvl[2] + '">AQI ' + maxAqi + "</b> (" + maxLvl[1] + ")</div>";
@@ -727,12 +871,16 @@
 
           var h = wx.hourly || {};
           if (h.cape && h.cape.length) {
-            var maxCape = Math.max.apply(null, h.cape.filter(function (v) { return v != null; }));
-            var maxGust = Math.max.apply(null, (h.wind_gusts_10m || [0]).filter(function (v) { return v != null; }));
-            var maxPop = Math.max.apply(null, (h.precipitation_probability || [0]).filter(function (v) { return v != null; }));
-            html += '<div class="ev" style="margin-top:8px">Next 24 h storm outlook</div>' +
+            var maxCape = maxOf(h.cape, 0);
+            html += '<div class="ev" style="margin-top:8px">Next 24 h outlook</div>' +
               '<div class="meta">Storm energy (CAPE): ' + Math.round(maxCape) + " J/kg &mdash; <b>" + capeLabel(maxCape) + "</b><br>" +
-              "Max rain chance: " + maxPop + "% &middot; Max wind gusts: " + Math.round(maxGust) + " km/h</div>";
+              "Max rain chance: " + maxOf(h.precipitation_probability, 0) + "% &middot; Gusts to " + Math.round(maxOf(h.wind_gusts_10m, 0)) + " km/h &middot; UV " + Math.round(maxOf(h.uv_index, 0)) + "</div>";
+          }
+
+          var dl = wx.daily || {};
+          if (dl.temperature_2m_max && dl.temperature_2m_max.length) {
+            html += '<div class="meta" style="margin-top:6px">Today: ' + Math.round(dl.temperature_2m_min[0]) + "&deg; to " +
+              Math.round(dl.temperature_2m_max[0]) + "&deg;C &middot; precip " + (dl.precipitation_sum[0] || 0).toFixed(1) + " mm</div>";
           }
 
           popup.setContent(html || '<div class="meta">No data available here.</div>');
@@ -750,6 +898,11 @@
     alertsLayer.addTo(map);
     loadAlerts();
     setInterval(loadAlerts, ALERTS_REFRESH_MS);
+
+    loadQuakes();
+    setInterval(loadQuakes, 5 * 60 * 1000);
+    loadGdacs();
+    setInterval(loadGdacs, 15 * 60 * 1000);
   </script>
 </body>
 </html>

@@ -37,10 +37,29 @@ designed to be shared privately across your devices with **Tailscale**.
     &rarr; ENH &rarr; MDT &rarr; HIGH), Days 1&ndash;3
   - **Tornado probability** — SPC probabilistic tornado risk, Days 1&ndash;2
   - **Fire weather outlook** — elevated/critical fire risk, Days 1&ndash;2
+- **Global hazard layers** (worldwide):
+  - **Earthquakes** — every quake of the past 24 h, sized and colored by
+    magnitude (USGS live feed, refreshes every 5 min)
+  - **Disaster alerts** — GDACS tropical cyclones with forecast tracks,
+    floods, volcanoes, wildfires and droughts, colored by green/orange/red
+    alert severity
+- **"Earth from space" view** — switch the basemap to NASA's daily VIIRS
+  true-color satellite mosaic of the whole planet (real clouds, smoke plumes
+  and snow cover as seen from orbit; occasional dark stripes are orbit-swath
+  gaps that fill in as NASA processes the day). Zoom all the way out for the
+  full globe.
+- **Point report** — click anywhere on Earth for current temperature, feels
+  like, wind/gusts, humidity and sky condition; air quality now and its 24 h
+  peak; the 24 h storm outlook (CAPE, rain chance, gusts, UV); and today's
+  temperature range and precipitation total
 - Opacity slider and precipitation-intensity legend
 - "My location" button (works over Tailscale HTTPS — geolocation requires a
   secure context, which `tailscale serve` gives you for free)
 - Dark UI that matches the rest of this repo's Twitch-style theme
+
+Weather alert polygons are fetched from NOAA's map service with server-side
+geometry simplification and rendered on canvas, so even ~2,500 simultaneous
+alerts stay smooth on phones.
 
 ## Quick start (local only)
 
