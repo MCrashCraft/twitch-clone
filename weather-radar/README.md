@@ -16,6 +16,19 @@ designed to be shared privately across your devices with **Tailscale**.
 - Animated radar loop with play/pause, frame stepping, scrubber, and speed
   control
 - Satellite infrared layer as an alternative to precipitation radar
+- **Hazard layers** (toggleable panel, top right):
+  - **Weather alerts** — live NWS active alerts as color-coded polygons:
+    tornado warnings (pulsing red), severe thunderstorms, floods, red flag /
+    fire weather, dense smoke, air quality alerts, heat, winter, wind, marine
+    and more. Click a polygon for the full alert text. Auto-refreshes every
+    2.5 minutes. (US only — [api.weather.gov](https://api.weather.gov), no key)
+  - **Active fires** — satellite thermal hotspot detections from the past day
+    (NASA VIIRS via [GIBS](https://nasa-gibs.github.io/gibs-api-docs/), global)
+  - **Smoke / aerosol** — daily aerosol optical depth, a good wildfire-smoke
+    proxy (NASA MODIS via GIBS, global)
+  - **Click-for-air-quality** — click anywhere on the map for live US AQI,
+    PM2.5, PM10 and ozone
+    ([Open-Meteo](https://open-meteo.com/en/docs/air-quality-api), global, no key)
 - Opacity slider and precipitation-intensity legend
 - "My location" button (works over Tailscale HTTPS — geolocation requires a
   secure context, which `tailscale serve` gives you for free)
