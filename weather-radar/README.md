@@ -26,9 +26,17 @@ designed to be shared privately across your devices with **Tailscale**.
     (NASA VIIRS via [GIBS](https://nasa-gibs.github.io/gibs-api-docs/), global)
   - **Smoke / aerosol** — daily aerosol optical depth, a good wildfire-smoke
     proxy (NASA MODIS via GIBS, global)
-  - **Click-for-air-quality** — click anywhere on the map for live US AQI,
-    PM2.5, PM10 and ozone
+  - **Click-for-conditions** — click anywhere on the map for live US AQI,
+    PM2.5, PM10 and ozone plus a next-24-hour outlook: peak AQI, storm energy
+    (CAPE), max rain chance and max wind gusts
     ([Open-Meteo](https://open-meteo.com/en/docs/air-quality-api), global, no key)
+- **Prediction layers** (Hazards panel &rarr; Predictions, with a Day 1/2/3
+  selector) — official NOAA Storm Prediction Center forecast polygons with
+  SPC's own risk colors, refreshed half-hourly:
+  - **Severe storm outlook** — categorical risk (TSTM &rarr; MRGL &rarr; SLGT
+    &rarr; ENH &rarr; MDT &rarr; HIGH), Days 1&ndash;3
+  - **Tornado probability** — SPC probabilistic tornado risk, Days 1&ndash;2
+  - **Fire weather outlook** — elevated/critical fire risk, Days 1&ndash;2
 - Opacity slider and precipitation-intensity legend
 - "My location" button (works over Tailscale HTTPS — geolocation requires a
   secure context, which `tailscale serve` gives you for free)

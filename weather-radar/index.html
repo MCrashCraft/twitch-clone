@@ -84,10 +84,6 @@
     #alert-legend div { display: flex; align-items: center; gap: 6px; padding: 2px 0; color: #adadb8; font-size: 11px; }
     #alert-legend i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
 
-    /* Tornado warnings pulse */
-    @keyframes alertpulse { 0%, 100% { stroke-opacity: 1; } 50% { stroke-opacity: 0.25; } }
-    path.pulse-alert { animation: alertpulse 1.1s infinite; }
-
     /* Dark-themed Leaflet popups */
     .leaflet-popup-content-wrapper, .leaflet-popup-tip {
       background: #18181b; color: #efeff1; box-shadow: 0 4px 24px rgba(0,0,0,0.6);
@@ -128,8 +124,21 @@
     <div class="sub">Satellite heat detections, past day (NASA VIIRS)</div>
     <label><input id="chk-smoke" type="checkbox" /> Smoke / aerosol</label>
     <div class="sub">Aerosol optical depth, daily (NASA MODIS)</div>
-    <label><input id="chk-aqi" type="checkbox" checked /> Click map for air quality</label>
-    <div class="sub">Live AQI, PM2.5, PM10, ozone at any point (Open-Meteo)</div>
+    <label><input id="chk-aqi" type="checkbox" checked /> Click map for conditions</label>
+    <div class="sub">Live air quality + next-24h storm, wind &amp; AQI outlook at any point (Open-Meteo)</div>
+    <h2 style="margin-top:10px">&#128302; Predictions
+      <select id="sel-outlook-day" style="float:right; font-size:11px; padding:2px 4px;">
+        <option value="1" selected>Day 1</option>
+        <option value="2">Day 2</option>
+        <option value="3">Day 3</option>
+      </select>
+    </h2>
+    <label><input id="chk-outlook" type="checkbox" /> Severe storm outlook</label>
+    <div class="sub">SPC categorical risk, TSTM &rarr; HIGH (US)</div>
+    <label><input id="chk-torprob" type="checkbox" /> Tornado probability</label>
+    <div class="sub">SPC tornado risk, Day 1&ndash;2 only (US)</div>
+    <label><input id="chk-fireout" type="checkbox" /> Fire weather outlook</label>
+    <div class="sub">SPC elevated / critical fire risk, Day 1&ndash;2 (US)</div>
     <div id="alert-legend">
       <div><i style="background:#ff1f1f"></i> Tornado</div>
       <div><i style="background:#ff8c00"></i> Severe thunderstorm</div>
@@ -193,7 +202,9 @@
     var RADAR_COLOR_SCHEME = 4;      // "The Weather Channel" palette
     var TILE_SIZE = 256;
 
-    var map = L.map("map", { zoomControl: true, attributionControl: true })
+    // preferCanvas: hundreds of alert/outlook polygons as SVG nodes crash
+    // mobile browsers on zoom; canvas rendering keeps them cheap.
+    var map = L.map("map", { zoomControl: true, attributionControl: true, preferCanvas: true })
       .setView([39.5, -98.35], 5); // continental US default; geolocation can re-center
 
     L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
@@ -251,7 +262,9 @@
         opacity: 0,
         maxNativeZoom: state.layerKind === "satellite" ? 8 : 10,
         maxZoom: 19,
-        zIndex: 400
+        zIndex: 400,
+        updateWhenZooming: false,
+        keepBuffer: 1
       });
     }
 
@@ -262,22 +275,28 @@
       state.tileLayers = {};
     }
 
-    function syncTileLayers() {
-      // Add any missing frame layers (preloaded invisible so playback is smooth)
+    // Only the current frame and its two neighbours are kept mounted. Keeping
+    // every frame mounted made each zoom refetch a dozen tile sets at once,
+    // which crashed phone browsers; the neighbour frame still preloads ahead
+    // of the animation so playback stays smooth after the first loop.
+    function mountFrameWindow(index) {
+      var n = state.frames.length;
+      if (!n) return;
+      var want = {};
+      [index - 1, index, index + 1].forEach(function (d) {
+        want[state.frames[((d % n) + n) % n].path] = true;
+      });
+      Object.keys(state.tileLayers).forEach(function (key) {
+        if (!want[key]) {
+          map.removeLayer(state.tileLayers[key]);
+          delete state.tileLayers[key];
+        }
+      });
       state.frames.forEach(function (frame) {
-        if (!state.tileLayers[frame.path]) {
+        if (want[frame.path] && !state.tileLayers[frame.path]) {
           var layer = makeTileLayer(frame);
           layer.addTo(map);
           state.tileLayers[frame.path] = layer;
-        }
-      });
-      // Drop layers for frames that no longer exist
-      var valid = {};
-      state.frames.forEach(function (f) { valid[f.path] = true; });
-      Object.keys(state.tileLayers).forEach(function (key) {
-        if (!valid[key]) {
-          map.removeLayer(state.tileLayers[key]);
-          delete state.tileLayers[key];
         }
       });
     }
@@ -295,6 +314,7 @@
       index = Math.max(0, Math.min(index, state.frames.length - 1));
       state.index = index;
 
+      mountFrameWindow(index);
       state.frames.forEach(function (frame, i) {
         var layer = state.tileLayers[frame.path];
         if (layer) layer.setOpacity(i === index ? state.opacity : 0);
@@ -339,7 +359,6 @@
       state.frames = frames;
       state.pastCount = pastCount;
       el.slider.max = String(Math.max(0, frames.length - 1));
-      syncTileLayers();
     }
 
     var lastData = null;
@@ -494,14 +513,14 @@
     }
 
     var alertsLayer = L.geoJSON(null, {
+      smoothFactor: 2,
       style: function (f) {
         var ev = f.properties.event || "";
         var isTornadoWarning = /tornado warning/i.test(ev);
         return {
           color: alertColor(ev),
-          weight: isTornadoWarning ? 3 : 1.5,
-          fillOpacity: isTornadoWarning ? 0.25 : 0.12,
-          className: isTornadoWarning ? "pulse-alert" : ""
+          weight: isTornadoWarning ? 4 : 1.5,
+          fillOpacity: isTornadoWarning ? 0.3 : 0.12
         };
       },
       onEachFeature: function (f, layer) {
@@ -581,32 +600,144 @@
       if (hz.smoke.checked) smokeLayer.addTo(map); else map.removeLayer(smokeLayer);
     });
 
-    // Click-anywhere air quality via Open-Meteo (global, no key).
+    // --------------------------- Outlooks (predictions) ---------------------------
+    // Official NOAA/SPC forecast polygons: where severe storms, tornadoes and
+    // dangerous fire weather are predicted for the next days. The service
+    // embeds its own official fill/stroke colors and risk labels.
+
+    var NOAA_VECTOR = "https://mapservices.weather.noaa.gov/vector/rest/services/";
+    var OUTLOOK_SOURCES = {
+      outlook: { 1: "outlooks/SPC_wx_outlks/MapServer/1", 2: "outlooks/SPC_wx_outlks/MapServer/9", 3: "outlooks/SPC_wx_outlks/MapServer/17" },
+      torprob: { 1: "outlooks/SPC_wx_outlks/MapServer/3", 2: "outlooks/SPC_wx_outlks/MapServer/11" },
+      fireout: { 1: "fire_weather/SPC_firewx/MapServer/1", 2: "fire_weather/SPC_firewx/MapServer/4" }
+    };
+    var OUTLOOK_TITLES = { outlook: "Severe storm outlook", torprob: "Tornado probability", fireout: "Fire weather outlook" };
+
+    hz.outlook = document.getElementById("chk-outlook");
+    hz.torprob = document.getElementById("chk-torprob");
+    hz.fireout = document.getElementById("chk-fireout");
+    hz.day = document.getElementById("sel-outlook-day");
+
+    var outlookGroups = { outlook: L.layerGroup(), torprob: L.layerGroup(), fireout: L.layerGroup() };
+    var outlookCache = {}; // service path -> { t, promise }
+    var OUTLOOK_TTL = 30 * 60 * 1000;
+
+    function spcTime(s) {
+      // "202607182000" -> local date string
+      if (!s || s.length < 12) return "?";
+      var d = new Date(Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(8, 10), +s.slice(10, 12)));
+      return d.toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" });
+    }
+
+    function fetchOutlook(path) {
+      var hit = outlookCache[path];
+      if (hit && performance.now() - hit.t < OUTLOOK_TTL) return hit.promise;
+      var promise = fetch(NOAA_VECTOR + path + "/query?where=1%3D1&outFields=*&f=geojson")
+        .then(function (r) {
+          if (!r.ok) throw new Error("NOAA service " + r.status);
+          return r.json();
+        });
+      outlookCache[path] = { t: performance.now(), promise: promise };
+      return promise;
+    }
+
+    function renderOutlook(kind) {
+      var group = outlookGroups[kind];
+      group.clearLayers();
+      if (!hz[kind].checked) { map.removeLayer(group); return; }
+      group.addTo(map);
+      var path = OUTLOOK_SOURCES[kind][hz.day.value];
+      if (!path) return; // e.g. tornado probability has no Day 3 product
+      fetchOutlook(path)
+        .then(function (geojson) {
+          L.geoJSON(geojson, {
+            smoothFactor: 2,
+            style: function (f) {
+              var p = f.properties || {};
+              return { color: p.stroke || "#b06bff", fillColor: p.fill || p.stroke || "#b06bff", weight: 1.5, fillOpacity: 0.22 };
+            },
+            onEachFeature: function (f, layer) {
+              var p = f.properties || {};
+              layer.bindPopup(
+                '<div class="ev" style="color:' + (p.stroke || "#b06bff") + '">' + OUTLOOK_TITLES[kind] + " &middot; Day " + hz.day.value + "</div>" +
+                '<div style="margin:4px 0; font-weight:600">' + (p.label2 || p.label || "Risk area") + "</div>" +
+                '<div class="meta">Valid ' + spcTime(p.valid) + " &ndash; " + spcTime(p.expire) + "<br>Source: NOAA Storm Prediction Center</div>",
+                { maxWidth: 300 }
+              );
+            }
+          }).addTo(group);
+        })
+        .catch(function () { /* outlook fetch failed; leave layer empty */ });
+    }
+
+    function renderAllOutlooks() {
+      Object.keys(outlookGroups).forEach(renderOutlook);
+    }
+    ["outlook", "torprob", "fireout"].forEach(function (kind) {
+      hz[kind].addEventListener("change", function () { renderOutlook(kind); });
+    });
+    hz.day.addEventListener("change", renderAllOutlooks);
+    setInterval(function () {
+      // Periodic refresh so a long-lived tab tracks new SPC issuances
+      outlookCache = {};
+      renderAllOutlooks();
+    }, OUTLOOK_TTL);
+
+    // Click-anywhere conditions & outlook via Open-Meteo (global, no key).
     var AQI_LEVELS = [
       [50, "Good", "#4caf50"], [100, "Moderate", "#ffd24d"],
       [150, "Unhealthy (sensitive)", "#ff9800"], [200, "Unhealthy", "#f44336"],
       [300, "Very unhealthy", "#b26bd8"], [Infinity, "Hazardous", "#a0455a"]
     ];
+    function capeLabel(cape) {
+      if (cape < 300) return "low";
+      if (cape < 1000) return "slight";
+      if (cape < 2500) return "moderate";
+      return "high";
+    }
+
     map.on("click", function (e) {
       if (!hz.aqi.checked) return;
       var lat = e.latlng.lat.toFixed(3), lon = e.latlng.lng.toFixed(3);
-      var popup = L.popup({ maxWidth: 260 }).setLatLng(e.latlng)
-        .setContent('<div class="meta">Fetching air quality&hellip;</div>').openOn(map);
-      fetch("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + lat +
-            "&longitude=" + lon + "&current=us_aqi,pm2_5,pm10,ozone")
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-          var c = d.current || {};
-          if (c.us_aqi == null) { popup.setContent('<div class="meta">No air quality data here.</div>'); return; }
-          var lvl = AQI_LEVELS.find(function (l) { return c.us_aqi <= l[0]; });
-          popup.setContent(
-            '<div class="ev">Air quality</div>' +
-            '<div style="margin:6px 0"><span class="aqi-chip" style="background:' + lvl[2] + '">AQI ' + c.us_aqi + "</span> " + lvl[1] + "</div>" +
-            '<div class="meta">PM2.5: ' + c.pm2_5 + " &micro;g/m&sup3; &middot; PM10: " + c.pm10 +
-            " &micro;g/m&sup3;<br>Ozone: " + c.ozone + " &micro;g/m&sup3;<br>" + lat + ", " + lon + "</div>"
-          );
+      var popup = L.popup({ maxWidth: 280 }).setLatLng(e.latlng)
+        .setContent('<div class="meta">Fetching conditions &amp; outlook&hellip;</div>').openOn(map);
+
+      var aqReq = fetch("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + lat +
+            "&longitude=" + lon + "&current=us_aqi,pm2_5,pm10,ozone&hourly=us_aqi&forecast_days=1")
+        .then(function (r) { return r.json(); });
+      var wxReq = fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon +
+            "&hourly=cape,wind_gusts_10m,precipitation_probability&forecast_days=1")
+        .then(function (r) { return r.json(); });
+
+      Promise.all([aqReq, wxReq])
+        .then(function (results) {
+          var aq = results[0] || {}, wx = results[1] || {};
+          var c = aq.current || {};
+          var html = "";
+
+          if (c.us_aqi != null) {
+            var lvl = AQI_LEVELS.find(function (l) { return c.us_aqi <= l[0]; });
+            var maxAqi = Math.max.apply(null, ((aq.hourly || {}).us_aqi || [c.us_aqi]).filter(function (v) { return v != null; }));
+            var maxLvl = AQI_LEVELS.find(function (l) { return maxAqi <= l[0]; });
+            html += '<div class="ev">Air quality</div>' +
+              '<div style="margin:5px 0"><span class="aqi-chip" style="background:' + lvl[2] + '">AQI ' + c.us_aqi + "</span> " + lvl[1] + "</div>" +
+              '<div class="meta">PM2.5: ' + c.pm2_5 + " &middot; PM10: " + c.pm10 + " &middot; O&#8323;: " + c.ozone + " &micro;g/m&sup3;<br>" +
+              "Next 24 h peak: <b style=\"color:" + maxLvl[2] + '">AQI ' + maxAqi + "</b> (" + maxLvl[1] + ")</div>";
+          }
+
+          var h = wx.hourly || {};
+          if (h.cape && h.cape.length) {
+            var maxCape = Math.max.apply(null, h.cape.filter(function (v) { return v != null; }));
+            var maxGust = Math.max.apply(null, (h.wind_gusts_10m || [0]).filter(function (v) { return v != null; }));
+            var maxPop = Math.max.apply(null, (h.precipitation_probability || [0]).filter(function (v) { return v != null; }));
+            html += '<div class="ev" style="margin-top:8px">Next 24 h storm outlook</div>' +
+              '<div class="meta">Storm energy (CAPE): ' + Math.round(maxCape) + " J/kg &mdash; <b>" + capeLabel(maxCape) + "</b><br>" +
+              "Max rain chance: " + maxPop + "% &middot; Max wind gusts: " + Math.round(maxGust) + " km/h</div>";
+          }
+
+          popup.setContent(html || '<div class="meta">No data available here.</div>');
         })
-        .catch(function () { popup.setContent('<div class="meta">Air quality lookup failed.</div>'); });
+        .catch(function () { popup.setContent('<div class="meta">Lookup failed.</div>'); });
     });
 
     // ------------------------------- Startup -------------------------------
