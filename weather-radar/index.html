@@ -81,6 +81,38 @@
     #alert-count { color: #adadb8; font-size: 11px; }
     #hazards .sub { color: #85858f; font-size: 10px; margin: 0 0 4px 21px; line-height: 1.35; }
     #alert-legend { margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 8px; }
+
+    /* iOS-style switches for the voice toggles */
+    .swrow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 0; color: #d3d3db; }
+    .switch { position: relative; width: 34px; height: 18px; flex: none; cursor: pointer; }
+    .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .switch i { position: absolute; inset: 0; background: #3f3f46; border-radius: 10px; transition: background 0.18s; }
+    .switch i:before { content: ""; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px; background: #adadb8; border-radius: 50%; transition: transform 0.18s, background 0.18s; }
+    .switch input:checked + i { background: #9147ff; }
+    .switch input:checked + i:before { transform: translateX(16px); background: #fff; }
+
+    .preset { padding: 5px 8px; font-size: 11px; }
+    .preset.active { background: #9147ff; }
+
+    #amber-banner {
+      top: 56px; left: 50%; transform: translateX(-50%);
+      padding: 8px 16px; font-weight: 700; color: #fff;
+      background: rgba(180, 20, 90, 0.95); border-color: #ff4fa3;
+      display: none;
+    }
+    #amber-banner.visible { display: block; }
+
+    .disp-icon { width: 12px; height: 12px; }
+    .disp-dot {
+      display: block; width: 10px; height: 10px; border-radius: 50%;
+      background: #2ea8ff; box-shadow: 0 0 0 0 rgba(46, 168, 255, 0.7);
+      animation: disppulse 1.6s infinite;
+    }
+    @keyframes disppulse {
+      0% { box-shadow: 0 0 0 0 rgba(46,168,255,0.7); }
+      70% { box-shadow: 0 0 0 9px rgba(46,168,255,0); }
+      100% { box-shadow: 0 0 0 0 rgba(46,168,255,0); }
+    }
     #alert-legend div { display: flex; align-items: center; gap: 6px; padding: 2px 0; color: #adadb8; font-size: 11px; }
     #alert-legend i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
 
@@ -115,13 +147,28 @@
   </div>
 
   <div id="status" class="panel"></div>
+  <div id="amber-banner" class="panel"></div>
 
   <div id="hazards" class="panel">
-    <h2>&#9888;&#65039; Hazards</h2>
+    <h2>&#128251; Radio (text-to-speech)</h2>
+    <div class="swrow"><span>Voice weather alerts</span>
+      <label class="switch"><input id="sw-radio" type="checkbox" /><i></i></label></div>
+    <div class="sub">NOAA-radio style: warning tone, then new warnings &amp; AMBER alerts spoken aloud</div>
+    <div class="swrow"><span>Voice 911 dispatch</span>
+      <label class="switch"><input id="sw-dispatch-tts" type="checkbox" /><i></i></label></div>
+    <div class="sub">Reads new public dispatch calls aloud as they appear</div>
+    <button id="btn-future-cast" style="width:100%; margin:4px 0 2px">&#128266; Simulated future broadcast</button>
+    <div class="sub" style="margin-left:0">Speaks what an alert broadcast may sound like for the area in view, from model forecasts</div>
+    <div id="amber-status" class="sub" style="margin-left:0">AMBER alerts: checking&hellip;</div>
+    <h2 style="margin-top:10px">&#9888;&#65039; Hazards</h2>
     <label><input id="chk-alerts" type="checkbox" checked /> Weather alerts <span id="alert-count"></span></label>
     <div class="sub">Tornado, severe storm, flood, fire, smoke &amp; air quality alerts (NWS, US only)</div>
-    <label><input id="chk-fires" type="checkbox" /> Active fires</label>
-    <div class="sub">Satellite heat detections, past day (NASA VIIRS)</div>
+    <label><input id="chk-wfigs" type="checkbox" checked /> Confirmed wildfires</label>
+    <div class="sub">Real dispatched fire incidents with name, size &amp; containment (NIFC/WFIGS, North America&ndash;US)</div>
+    <label><input id="chk-dispatch" type="checkbox" checked /> 911 dispatch calls</label>
+    <div class="sub">Live official public dispatch logs, pinpointed (Seattle Fire 911; legal open-data feeds &mdash; not call audio)</div>
+    <label><input id="chk-fires" type="checkbox" /> Fire heat detections</label>
+    <div class="sub">Satellite heat pixels, past day (NASA VIIRS)</div>
     <label><input id="chk-smoke" type="checkbox" /> Smoke / aerosol</label>
     <div class="sub">Aerosol optical depth, daily (NASA MODIS)</div>
     <label><input id="chk-aqi" type="checkbox" checked /> Click map for point report</label>
@@ -166,9 +213,9 @@
       <button id="btn-locate" title="Center map on my location">&#128205; My location</button>
     </div>
     <div class="row" id="future-row" style="display:none">
-      <label class="ctl"><input id="fchk-hrrr" type="checkbox" checked /> Future radar (US model)</label>
+      <label class="ctl"><input id="fchk-hrrr" type="checkbox" checked /> Future radar (US hi-res)</label>
+      <label class="ctl"><input id="fchk-precip" type="checkbox" checked /> Future radar (global)</label>
       <label class="ctl"><input id="fchk-clouds" type="checkbox" checked /> Simulated satellite (clouds)</label>
-      <label class="ctl"><input id="fchk-precip" type="checkbox" /> Precipitation (global)</label>
       <label class="ctl"><input id="fchk-cape" type="checkbox" /> Storm energy</label>
     </div>
     <div class="row">
@@ -185,12 +232,15 @@
         </select>
       </label>
       <label class="ctl">Speed
-        <select id="sel-speed">
-          <option value="1000">Slow</option>
-          <option value="500" selected>Normal</option>
-          <option value="250">Fast</option>
-        </select>
+        <input id="speed-slider" type="range" min="120" max="1500" step="5" value="1120"
+               title="Animation speed" style="width:90px; flex:none;" />
       </label>
+      <span class="ctl">
+        <button class="preset" data-ms="1000">0.5&times;</button>
+        <button class="preset active" data-ms="500">1&times;</button>
+        <button class="preset" data-ms="250">2&times;</button>
+        <button class="preset" data-ms="125">4&times;</button>
+      </span>
       <label class="ctl">Opacity
         <input id="opacity-slider" type="range" min="0.1" max="1" step="0.05" value="0.75" style="width:90px; flex:none;" />
       </label>
@@ -274,7 +324,7 @@
       slider: document.getElementById("frame-slider"),
       opacity: document.getElementById("opacity-slider"),
       layer: document.getElementById("sel-layer"),
-      speed: document.getElementById("sel-speed"),
+      speed: document.getElementById("speed-slider"),
       nowcast: document.getElementById("chk-nowcast"),
       time: document.getElementById("frame-time"),
       status: document.getElementById("status")
@@ -465,9 +515,22 @@
       else showFrame(state.index);
     });
 
-    el.speed.addEventListener("change", function () {
-      state.speedMs = parseInt(el.speed.value, 10);
+    // Speed slider is inverted (right = faster): ms = 1620 - sliderValue.
+    function setSpeed(ms) {
+      state.speedMs = ms;
+      el.speed.value = String(1620 - ms);
+      document.querySelectorAll(".preset").forEach(function (b) {
+        b.classList.toggle("active", +b.getAttribute("data-ms") === ms);
+      });
       if (state.playing) { pause(); play(); }
+    }
+    el.speed.addEventListener("input", function () {
+      state.speedMs = 1620 - parseInt(el.speed.value, 10);
+      document.querySelectorAll(".preset").forEach(function (b) { b.classList.remove("active"); });
+      if (state.playing) { pause(); play(); }
+    });
+    document.querySelectorAll(".preset").forEach(function (b) {
+      b.addEventListener("click", function () { setSpeed(+b.getAttribute("data-ms")); });
     });
 
     el.layer.addEventListener("change", function () {
@@ -515,7 +578,7 @@
     // storm energy (CAPE) — which work anywhere on Earth.
 
     var FUTURE_HOURS = 24;
-    var GRID_NX = 20, GRID_NY = 12;
+    var GRID_NX = 28, GRID_NY = 16; // 448 model points over the viewport, fetched in two batches
 
     var future = {
       on: false,
@@ -645,14 +708,22 @@
           lons.push((west + (east - west) * (col + 0.5) / GRID_NX).toFixed(2));
         }
       }
-      var url = "https://api.open-meteo.com/v1/forecast?latitude=" + lats.join(",") +
-                "&longitude=" + lons.join(",") +
-                "&hourly=cloud_cover,precipitation,cape&forecast_days=2&timezone=UTC";
-      fetch(url)
-        .then(function (r) { return r.json(); })
+      function batch(la, lo) {
+        return fetch("https://api.open-meteo.com/v1/forecast?latitude=" + la.join(",") +
+                     "&longitude=" + lo.join(",") +
+                     "&hourly=cloud_cover,precipitation,cape&forecast_days=2&timezone=UTC")
+          .then(function (r) { return r.json(); });
+      }
+      var half = Math.floor(lats.length / 2);
+      Promise.all([batch(lats.slice(0, half), lons.slice(0, half)), batch(lats.slice(half), lons.slice(half))])
+        .then(function (parts) {
+          var a = Array.isArray(parts[0]) ? parts[0] : [parts[0]];
+          var b = Array.isArray(parts[1]) ? parts[1] : [parts[1]];
+          return a.concat(b);
+        })
         .then(function (data) {
           if (seq !== future.fetchSeq) return; // superseded by a newer viewport
-          if (!Array.isArray(data)) throw new Error(data.reason || "unexpected response");
+          if (!Array.isArray(data) || !data[0] || !data[0].hourly) throw new Error("unexpected response");
           var times = (data[0].hourly || {}).time || [];
           var nowIso = new Date().toISOString().slice(0, 13); // "YYYY-MM-DDTHH"
           var startIdx = 0;
@@ -843,6 +914,7 @@
           alertsLayer.addData({ type: "FeatureCollection", features: zones });
           alertsLayer.addData({ type: "FeatureCollection", features: warnings }); // warnings drawn on top
           hz.count.textContent = "(" + (zones.length + warnings.length) + " active)";
+          radioProcessWarnings(warnings);
         })
         .catch(function () { hz.count.textContent = "(unavailable)"; });
     }
@@ -1135,6 +1207,298 @@
         .catch(function () { popup.setContent('<div class="meta">Lookup failed.</div>'); });
     });
 
+    // ------------------- Radio (TTS), AMBER, fires, dispatch -------------------
+    // "Weather radio" is generated locally: a 1050 Hz NOAA-style attention tone
+    // from WebAudio, then the browser's text-to-speech reads the alert.
+
+    var radio = {
+      alerts: document.getElementById("sw-radio"),
+      dispatchTts: document.getElementById("sw-dispatch-tts"),
+      seenWarn: null,   // null until first load so we don't announce the backlog
+      seenFires: null,
+      seenCalls: null,
+      seenAmber: {}
+    };
+
+    function warnTone() {
+      return new Promise(function (resolve) {
+        try {
+          var AC = window.AudioContext || window.webkitAudioContext;
+          var ctx = new AC();
+          var osc = ctx.createOscillator(), gain = ctx.createGain();
+          osc.frequency.value = 1050; osc.type = "sine";
+          gain.gain.setValueAtTime(0.22, ctx.currentTime);
+          gain.gain.setTargetAtTime(0, ctx.currentTime + 0.75, 0.08);
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.start(); osc.stop(ctx.currentTime + 1.0);
+          osc.onended = function () { ctx.close(); resolve(); };
+          setTimeout(resolve, 1500); // safety net if audio is blocked
+        } catch (e) { resolve(); }
+      });
+    }
+
+    function speak(text) {
+      if (!("speechSynthesis" in window)) return;
+      var u = new SpeechSynthesisUtterance(text);
+      u.rate = 0.95; u.pitch = 0.9;
+      window.speechSynthesis.speak(u);
+    }
+
+    function radioAnnounce(text) {
+      warnTone().then(function () { speak(text); });
+    }
+
+    function radioProcessWarnings(features) {
+      var ids = new Set(), fresh = [];
+      features.forEach(function (f) {
+        var id = ((f.properties.url || "") + (f.properties.prod_type || "") + (f.properties.onset || "")).trim();
+        ids.add(id);
+        if (radio.seenWarn && !radio.seenWarn.has(id)) fresh.push(f.properties);
+      });
+      var first = !radio.seenWarn;
+      radio.seenWarn = ids;
+      if (first || !radio.alerts.checked) return;
+      fresh.slice(0, 5).forEach(function (p) {
+        radioAnnounce("The National Weather Service has issued a " + (p.prod_type || "warning").trim() +
+                      ", in effect until " + fmtWhen(p.expiration) + ".");
+      });
+    }
+
+    radio.alerts.addEventListener("change", function () {
+      if (radio.alerts.checked) {
+        var n = radio.seenWarn ? radio.seenWarn.size : 0;
+        radioAnnounce("Weather radio on. " + n + " storm based warnings are currently active. " +
+                      "New warnings and amber alerts will be announced.");
+        pollAmber();
+      } else if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    });
+
+    // ---- AMBER alerts (NWS Child Abduction Emergency feed) ----
+
+    var amberLayer = L.geoJSON(null, { style: { color: "#ff2d95", weight: 3, fillOpacity: 0.2 } }).addTo(map);
+    var amberBanner = document.getElementById("amber-banner");
+    var amberStatus = document.getElementById("amber-status");
+
+    function pollAmber() {
+      fetch("https://api.weather.gov/alerts/active?event=Child%20Abduction%20Emergency",
+            { headers: { Accept: "application/geo+json" } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var feats = d.features || [];
+          amberLayer.clearLayers();
+          feats.forEach(function (f) { if (f.geometry) amberLayer.addData(f); });
+          if (!feats.length) {
+            amberStatus.textContent = "AMBER alerts: none active";
+            amberBanner.classList.remove("visible");
+            return;
+          }
+          var p0 = feats[0].properties || {};
+          amberStatus.textContent = "AMBER alerts: " + feats.length + " ACTIVE";
+          amberBanner.textContent = "AMBER ALERT — " + (p0.areaDesc || "").slice(0, 120);
+          amberBanner.classList.add("visible");
+          feats.forEach(function (f) {
+            var id = (f.properties || {}).id || f.id || JSON.stringify(f.properties && f.properties.sent);
+            if (!radio.seenAmber[id]) {
+              radio.seenAmber[id] = true;
+              if (radio.alerts.checked) {
+                radioAnnounce("Amber alert. Child abduction emergency for " +
+                              ((f.properties || {}).areaDesc || "the affected area") + ". " +
+                              ((f.properties || {}).description || "").slice(0, 300));
+              }
+            }
+          });
+        })
+        .catch(function () { amberStatus.textContent = "AMBER alerts: feed unavailable"; });
+    }
+
+    // ---- Confirmed wildfires (NIFC/WFIGS dispatched incidents) ----
+
+    var WFIGS_URL = "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/" +
+      "WFIGS_Incident_Locations_Current/FeatureServer/0/query?where=IncidentTypeCategory%3D%27WF%27" +
+      "&outFields=IncidentName,IncidentSize,PercentContained,FireDiscoveryDateTime,POOState,POOCounty," +
+      "FireBehaviorGeneral,TotalIncidentPersonnel&f=geojson";
+
+    var wfigsChk = document.getElementById("chk-wfigs");
+    var wfigsGroup = L.layerGroup().addTo(map);
+
+    function loadWfigs() {
+      if (!wfigsChk.checked) return;
+      fetch(WFIGS_URL)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          wfigsGroup.clearLayers();
+          var ids = new Set(), fresh = [];
+          (d.features || []).forEach(function (f) {
+            if (!f.geometry) return;
+            var p = f.properties, c = f.geometry.coordinates;
+            var acres = p.IncidentSize || 0;
+            var id = (p.IncidentName || "") + "|" + (p.FireDiscoveryDateTime || "");
+            ids.add(id);
+            if (radio.seenFires && !radio.seenFires.has(id)) fresh.push(p);
+            var rad = Math.max(4, Math.min(18, 4 + Math.log(Math.max(1, acres)) * 1.7));
+            L.circleMarker([c[1], c[0]], { radius: rad, color: "#ff6d00", weight: 1.5, fillColor: "#ff3d00", fillOpacity: 0.6 })
+              .bindPopup(
+                '<div class="ev" style="color:#ff9100">&#128293; ' + (p.IncidentName || "Fire incident") + "</div>" +
+                '<div class="meta">' +
+                (acres ? acres.toLocaleString() + " acres &middot; " : "") +
+                (p.PercentContained != null ? p.PercentContained + "% contained &middot; " : "") +
+                (p.POOCounty ? p.POOCounty + ", " : "") + (p.POOState || "").replace("US-", "") + "<br>" +
+                (p.FireBehaviorGeneral ? "Behavior: " + p.FireBehaviorGeneral + "<br>" : "") +
+                "Discovered " + (p.FireDiscoveryDateTime ? new Date(p.FireDiscoveryDateTime).toLocaleDateString() : "?") +
+                (p.TotalIncidentPersonnel ? " &middot; " + p.TotalIncidentPersonnel + " personnel" : "") + "</div>",
+                { maxWidth: 280 })
+              .addTo(wfigsGroup);
+          });
+          var first = !radio.seenFires;
+          radio.seenFires = ids;
+          if (!first && radio.alerts.checked) {
+            fresh.slice(0, 3).forEach(function (p) {
+              radioAnnounce("New confirmed wildfire incident: " + (p.IncidentName || "unnamed fire") + ", " +
+                            (p.POOCounty ? p.POOCounty + " county, " : "") + (p.POOState || "").replace("US-", "") + ".");
+            });
+          }
+        })
+        .catch(function () { /* retried on next interval */ });
+    }
+    wfigsChk.addEventListener("change", function () {
+      if (wfigsChk.checked) { wfigsGroup.addTo(map); loadWfigs(); }
+      else map.removeLayer(wfigsGroup);
+    });
+
+    // ---- Public 911 dispatch feeds (official open-data CAD logs, not audio) ----
+
+    var DISPATCH_FEEDS = [
+      {
+        id: "seattle-fire-911", label: "Seattle Fire 911",
+        url: "https://data.seattle.gov/resource/kzjm-xkqj.json?$limit=40&$order=datetime%20DESC",
+        parse: function (rec) {
+          var lat = parseFloat(rec.latitude), lon = parseFloat(rec.longitude);
+          if (!isFinite(lat) || !isFinite(lon)) return null;
+          return { id: rec.incident_number || (rec.datetime + rec.address), type: rec.type || "Call",
+                   addr: rec.address || "", timeText: (rec.datetime || "").slice(11, 16), lat: lat, lon: lon };
+        }
+      }
+      // Add more legal public CAD feeds here: {id, label, url, parse(record) -> {id,type,addr,timeText,lat,lon}}
+    ];
+
+    var dispatchChk = document.getElementById("chk-dispatch");
+    var dispatchGroup = L.layerGroup().addTo(map);
+    var dispIcon = L.divIcon({ className: "disp-icon", html: '<span class="disp-dot"></span>', iconSize: [12, 12], iconAnchor: [6, 6] });
+
+    function loadDispatch() {
+      if (!dispatchChk.checked) return;
+      DISPATCH_FEEDS.forEach(function (feed) {
+        fetch(feed.url)
+          .then(function (r) { return r.json(); })
+          .then(function (rows) {
+            dispatchGroup.eachLayer(function (l) { if (l._feedId === feed.id) dispatchGroup.removeLayer(l); });
+            var prev = radio.seenCalls && radio.seenCalls[feed.id];
+            var ids = new Set(), fresh = [];
+            (rows || []).forEach(function (rec) {
+              var call = feed.parse(rec);
+              if (!call) return;
+              var key = String(call.id);
+              ids.add(key);
+              if (prev && !prev.has(key)) fresh.push(call);
+              var m = L.marker([call.lat, call.lon], { icon: dispIcon })
+                .bindPopup(
+                  '<div class="ev" style="color:#2ea8ff">&#128680; ' + feed.label + "</div>" +
+                  '<div style="margin:3px 0; font-weight:600">' + call.type + "</div>" +
+                  '<div class="meta">' + call.addr + "<br>Received " + call.timeText + " local &middot; #" + call.id +
+                  "<br>Official public dispatch log (not call audio)</div>",
+                  { maxWidth: 280 });
+              m._feedId = feed.id;
+              m.addTo(dispatchGroup);
+            });
+            radio.seenCalls = radio.seenCalls || {};
+            radio.seenCalls[feed.id] = ids;
+            if (prev && radio.dispatchTts.checked) {
+              fresh.slice(0, 4).forEach(function (c) {
+                speak(feed.label + " dispatch. " + c.type + ", " + c.addr + ".");
+              });
+            }
+          })
+          .catch(function () { /* retried on next interval */ });
+      });
+    }
+    dispatchChk.addEventListener("change", function () {
+      if (dispatchChk.checked) { dispatchGroup.addTo(map); loadDispatch(); }
+      else map.removeLayer(dispatchGroup);
+    });
+    radio.dispatchTts.addEventListener("change", function () {
+      if (radio.dispatchTts.checked) speak("Dispatch voice on. New public dispatch calls will be read aloud.");
+    });
+
+    // ---- Simulated future broadcast: what a future alert may sound like ----
+
+    function featureIntersectsMap(f, mb) {
+      var w = 180, s = 90, e = -180, n = -90;
+      (function scan(c) {
+        if (typeof c[0] === "number") {
+          w = Math.min(w, c[0]); e = Math.max(e, c[0]);
+          s = Math.min(s, c[1]); n = Math.max(n, c[1]);
+        } else { c.forEach(scan); }
+      })(f.geometry.coordinates);
+      return !(e < mb.getWest() || w > mb.getEast() || n < mb.getSouth() || s > mb.getNorth());
+    }
+
+    document.getElementById("btn-future-cast").addEventListener("click", function () {
+      var mb = map.getBounds(), center = map.getCenter();
+      speak("Preparing simulated broadcast.");
+      var wxP = fetch("https://api.open-meteo.com/v1/forecast?latitude=" + center.lat.toFixed(2) +
+                      "&longitude=" + center.lng.toFixed(2) +
+                      "&hourly=cape,wind_gusts_10m,precipitation_probability&forecast_days=1&timezone=auto")
+        .then(function (r) { return r.json(); });
+      var spcP = fetchOutlook(OUTLOOK_SOURCES.outlook[1]).catch(function () { return null; });
+
+      Promise.all([spcP, wxP]).then(function (res) {
+        var spc = res[0], wx = res[1];
+        var parts = ["This is a simulated future weather broadcast, generated from model forecasts. " +
+                     "It is not an official National Weather Service product."];
+        var best = null;
+        if (spc) {
+          (spc.features || []).forEach(function (f) {
+            var p = f.properties || {};
+            if (f.geometry && featureIntersectsMap(f, mb) && (!best || (p.dn || 0) > (best.dn || 0))) best = p;
+          });
+        }
+        if (best && (best.label2 || best.label)) {
+          parts.push("For today, the Storm Prediction Center places parts of the area in view under a " +
+                     (best.label2 || best.label) + ".");
+          if (/enhanced|moderate|high/i.test(best.label2 || "")) {
+            parts.push("Severe thunderstorm and tornado watches may be required later today.");
+          }
+        } else {
+          parts.push("No severe storm outlook areas cover the area currently in view.");
+        }
+        var h = (wx && wx.hourly) || {};
+        if (h.cape && h.cape.length) {
+          var maxCape = 0, maxIdx = 0;
+          h.cape.slice(0, 24).forEach(function (v, i) { if (v != null && v > maxCape) { maxCape = v; maxIdx = i; } });
+          var gust = Math.max.apply(null, (h.wind_gusts_10m || [0]).slice(0, 24).filter(function (v) { return v != null; }));
+          var pop = Math.max.apply(null, (h.precipitation_probability || [0]).slice(0, 24).filter(function (v) { return v != null; }));
+          var when = h.time && h.time[maxIdx] ? new Date(h.time[maxIdx]).toLocaleTimeString(undefined, { hour: "numeric" }) : "later today";
+          if (maxCape >= 300) {
+            parts.push("Near the center of the map, storm energy peaks around " + when + " at roughly " +
+                       Math.round(maxCape) + " joules per kilogram. Peak wind gusts near " + Math.round(gust) +
+                       " kilometers per hour, with up to a " + pop + " percent chance of rain.");
+            if (maxCape >= 2500) {
+              parts.push("If storms develop, a warning could sound like this. The National Weather Service has issued " +
+                         "a severe thunderstorm warning for the central viewing area. Large hail and damaging winds " +
+                         "are possible. Move indoors, away from windows.");
+            }
+          } else {
+            parts.push("The atmosphere near the map center stays mostly stable over the next twenty four hours, " +
+                       "with peak gusts near " + Math.round(gust) + " kilometers per hour.");
+          }
+        }
+        parts.push("End of simulated broadcast.");
+        radioAnnounce(parts.join(" "));
+      }).catch(function () { speak("Simulated broadcast is unavailable right now."); });
+    });
+
     // ------------------------------- Startup -------------------------------
 
     loadFrames(false).then(function () {
@@ -1150,6 +1514,13 @@
     setInterval(loadQuakes, 5 * 60 * 1000);
     loadGdacs();
     setInterval(loadGdacs, 15 * 60 * 1000);
+
+    loadWfigs();
+    setInterval(loadWfigs, 10 * 60 * 1000);
+    loadDispatch();
+    setInterval(loadDispatch, 60 * 1000);
+    pollAmber();
+    setInterval(pollAmber, 2 * 60 * 1000);
   </script>
 </body>
 </html>

@@ -71,6 +71,46 @@ Weather alert polygons are fetched from NOAA's map service with server-side
 geometry simplification and rendered on canvas, so even ~2,500 simultaneous
 alerts stay smooth on phones.
 
+- **Radio (text-to-speech)** — the site generates its own NOAA-weather-radio
+  style broadcasts locally: a 1050 Hz attention tone, then the browser's
+  speech synthesis reads the alert. Two switch toggles:
+  - **Voice weather alerts** — announces new storm-based warnings and AMBER
+    alerts as they arrive (first load is silent so you don't get a backlog)
+  - **Voice 911 dispatch** — reads new public dispatch calls aloud
+  - **Simulated future broadcast** button — composes and speaks what an alert
+    broadcast *may* sound like for the area in view, from the SPC outlook and
+    model forecasts (clearly labeled as a simulation)
+- **AMBER alerts** — polls the official NWS Child Abduction Emergency feed
+  every 2 minutes; active alerts show a banner, map polygons and a spoken
+  announcement
+- **Confirmed wildfires** — real dispatched fire incidents (NIFC/WFIGS, US):
+  name, acres, containment, fire behavior, personnel — not just satellite
+  heat pixels (those remain available as a separate layer)
+- **911 dispatch calls** — live official public dispatch logs (currently
+  Seattle Fire 911 via the city's open-data API), pinpointed on the map with
+  pulsing markers. These are legal public CAD records; actual 911 call audio
+  is not publicly available. More feeds can be added in `DISPATCH_FEEDS`
+  in `index.html` — any open-data CAD feed with coordinates works.
+- **Speed control** — slider plus 0.5×/1×/2×/4× presets
+
+## JSON API
+
+`server.py` serves the static site **and** a small aggregating JSON API with
+CORS enabled (see `/api/status` for the list):
+
+| Endpoint | Data |
+| --- | --- |
+| `/api/alerts` | active US watches/warnings/advisories (GeoJSON, simplified) |
+| `/api/amber` | active AMBER alerts (NWS CAE feed) |
+| `/api/quakes` | earthquakes past 24 h worldwide (USGS) |
+| `/api/fires` | confirmed active wildfire incidents (NIFC/WFIGS) |
+| `/api/disasters` | global disaster alerts (GDACS) |
+| `/api/dispatch` | recent public-safety dispatch calls (normalized) |
+| `/api/point?lat=&lon=` | current weather + air quality + 24 h outlook |
+
+Responses are cached server-side for 1–15 minutes per feed to be polite to
+the upstream services.
+
 ## Quick start (local only)
 
 ```bash

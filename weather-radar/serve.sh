@@ -54,4 +54,4 @@ case "$MODE" in
     ;;
 esac
 
-exec python3 -m http.server "$PORT" --bind 0.0.0.0 --directory "$DIR"
+exec python3 "$DIR/server.py" "$PORT"
