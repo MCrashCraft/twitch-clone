@@ -162,7 +162,14 @@
       <button id="btn-next" title="Next frame">&#9654;</button>
       <input id="frame-slider" type="range" min="0" max="0" value="0" step="1" />
       <button id="btn-latest" title="Jump to latest radar frame">Latest</button>
+      <button id="btn-future" title="Switch between observed radar and 24h model simulation">&#128302; Future</button>
       <button id="btn-locate" title="Center map on my location">&#128205; My location</button>
+    </div>
+    <div class="row" id="future-row" style="display:none">
+      <label class="ctl"><input id="fchk-hrrr" type="checkbox" checked /> Future radar (US model)</label>
+      <label class="ctl"><input id="fchk-clouds" type="checkbox" checked /> Simulated satellite (clouds)</label>
+      <label class="ctl"><input id="fchk-precip" type="checkbox" /> Precipitation (global)</label>
+      <label class="ctl"><input id="fchk-cape" type="checkbox" /> Storm energy</label>
     </div>
     <div class="row">
       <label class="ctl">Layer
@@ -218,7 +225,7 @@
     var map = L.map("map", { zoomControl: true, attributionControl: true, preferCanvas: true, minZoom: 2, worldCopyJump: true })
       .setView([39.5, -98.35], 5); // continental US default; zoom out for the whole globe
 
-    var ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a> | <a href="https://earthdata.nasa.gov/gibs">NASA GIBS</a> | Radar &copy; <a href="https://www.rainviewer.com/">RainViewer</a>';
+    var ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a> | <a href="https://earthdata.nasa.gov/gibs">NASA GIBS</a> | Radar &copy; <a href="https://www.rainviewer.com/">RainViewer</a> | HRRR via <a href="https://mesonet.agron.iastate.edu/">IEM</a> | Forecast &copy; <a href="https://open-meteo.com/">Open-Meteo</a>';
 
     function gibsDailyDate() {
       // Yesterday UTC: today's global satellite mosaic is still being assembled.
@@ -341,7 +348,7 @@
     }
 
     function showFrame(index) {
-      if (!state.frames.length) return;
+      if (!state.frames.length || future.on) return; // future mode owns the display
       index = Math.max(0, Math.min(index, state.frames.length - 1));
       state.index = index;
 
@@ -363,9 +370,13 @@
       state.playing = true;
       el.play.innerHTML = "&#10074;&#10074; Pause";
       state.timer = setInterval(function () {
-        var next = state.index + 1;
-        if (next >= state.frames.length) next = 0;
-        showFrame(next);
+        if (future.on) {
+          showFuture((future.index + 1) % (FUTURE_HOURS + 1));
+        } else {
+          var next = state.index + 1;
+          if (next >= state.frames.length) next = 0;
+          showFrame(next);
+        }
       }, state.speedMs);
     }
 
@@ -389,7 +400,7 @@
       state.host = data.host;
       state.frames = frames;
       state.pastCount = pastCount;
-      el.slider.max = String(Math.max(0, frames.length - 1));
+      if (!future.on) el.slider.max = String(Math.max(0, frames.length - 1));
     }
 
     var lastData = null;
@@ -426,27 +437,32 @@
 
     el.prev.addEventListener("click", function () {
       pause();
-      showFrame(state.index === 0 ? state.frames.length - 1 : state.index - 1);
+      if (future.on) showFuture(future.index === 0 ? FUTURE_HOURS : future.index - 1);
+      else showFrame(state.index === 0 ? state.frames.length - 1 : state.index - 1);
     });
 
     el.next.addEventListener("click", function () {
       pause();
-      showFrame(state.index >= state.frames.length - 1 ? 0 : state.index + 1);
+      if (future.on) showFuture((future.index + 1) % (FUTURE_HOURS + 1));
+      else showFrame(state.index >= state.frames.length - 1 ? 0 : state.index + 1);
     });
 
     el.latest.addEventListener("click", function () {
       pause();
-      showFrame(state.pastCount > 0 ? state.pastCount - 1 : 0);
+      if (future.on) showFuture(0);
+      else showFrame(state.pastCount > 0 ? state.pastCount - 1 : 0);
     });
 
     el.slider.addEventListener("input", function () {
       pause();
-      showFrame(parseInt(el.slider.value, 10));
+      if (future.on) showFuture(parseInt(el.slider.value, 10));
+      else showFrame(parseInt(el.slider.value, 10));
     });
 
     el.opacity.addEventListener("input", function () {
       state.opacity = parseFloat(el.opacity.value);
-      showFrame(state.index);
+      if (future.on) showFuture(future.index);
+      else showFrame(state.index);
     });
 
     el.speed.addEventListener("change", function () {
@@ -488,6 +504,237 @@
         },
         { enableHighAccuracy: false, timeout: 10000 }
       );
+    });
+
+    // --------------------------- Future simulation ---------------------------
+    // "Future" mode replaces the observed radar loop with a 24-hour model
+    // simulation: NOAA HRRR simulated reflectivity tiles (the model's own
+    // prediction of what radar will look like, US, via Iowa Environmental
+    // Mesonet) plus overlays computed in the browser from an Open-Meteo
+    // forecast grid — simulated satellite (cloud cover), precipitation and
+    // storm energy (CAPE) — which work anywhere on Earth.
+
+    var FUTURE_HOURS = 24;
+    var GRID_NX = 20, GRID_NY = 12;
+
+    var future = {
+      on: false,
+      index: 0,
+      hrrrLayers: {},   // hour -> tile layer (windowed like the live radar)
+      grid: null,       // { bounds, times, startIdx, data:[per-location hourly] }
+      overlays: {},     // kind -> L.imageOverlay
+      fetchSeq: 0
+    };
+
+    var fel = {
+      btn: document.getElementById("btn-future"),
+      row: document.getElementById("future-row"),
+      hrrr: document.getElementById("fchk-hrrr"),
+      clouds: document.getElementById("fchk-clouds"),
+      precip: document.getElementById("fchk-precip"),
+      cape: document.getElementById("fchk-cape")
+    };
+
+    function hrrrLayer(hour) {
+      var f = String(hour * 60);
+      while (f.length < 4) f = "0" + f;
+      return L.tileLayer("https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/hrrr::REFD-F" + f + "-0/{z}/{x}/{y}.png", {
+        opacity: 0, zIndex: 400, maxNativeZoom: 9, maxZoom: 19,
+        updateWhenZooming: false, keepBuffer: 1
+      });
+    }
+
+    function mountHrrrWindow(hour) {
+      var want = {};
+      if (fel.hrrr.checked) {
+        [hour - 1, hour, hour + 1].forEach(function (h) {
+          want[((h % (FUTURE_HOURS + 1)) + FUTURE_HOURS + 1) % (FUTURE_HOURS + 1)] = true;
+        });
+      }
+      Object.keys(future.hrrrLayers).forEach(function (h) {
+        if (!want[h]) { map.removeLayer(future.hrrrLayers[h]); delete future.hrrrLayers[h]; }
+      });
+      Object.keys(want).forEach(function (h) {
+        if (!future.hrrrLayers[h]) {
+          future.hrrrLayers[h] = hrrrLayer(+h).addTo(map);
+        }
+        future.hrrrLayers[h].setOpacity(+h === hour ? state.opacity : 0);
+      });
+    }
+
+    // ---- Open-Meteo forecast grid -> canvas overlays ----
+
+    function gridPalette(kind, v) {
+      // returns [r,g,b,a] for a value; a in 0-255
+      if (v == null) return [0, 0, 0, 0];
+      if (kind === "clouds") return [235, 238, 245, Math.round(v * 2.1)]; // 0-100% cloud
+      if (kind === "precip") { // mm/h
+        if (v < 0.1) return [0, 0, 0, 0];
+        if (v < 0.5) return [110, 170, 255, 100];
+        if (v < 1.5) return [30, 110, 230, 130];
+        if (v < 3) return [255, 230, 0, 150];
+        if (v < 6) return [255, 140, 0, 165];
+        if (v < 12) return [230, 30, 30, 180];
+        return [255, 0, 255, 195];
+      }
+      if (kind === "cape") { // J/kg
+        if (v < 300) return [0, 0, 0, 0];
+        if (v < 1000) return [255, 220, 80, 70];
+        if (v < 2500) return [255, 150, 40, 110];
+        if (v < 4000) return [235, 50, 40, 140];
+        return [200, 40, 220, 170];
+      }
+      return [0, 0, 0, 0];
+    }
+
+    var GRID_VARS = { clouds: "cloud_cover", precip: "precipitation", cape: "cape" };
+
+    function renderGridOverlay(kind, hour) {
+      var g = future.grid;
+      if (!g) return;
+      var small = document.createElement("canvas");
+      small.width = GRID_NX; small.height = GRID_NY;
+      var ctx = small.getContext("2d");
+      var img = ctx.createImageData(GRID_NX, GRID_NY);
+      for (var row = 0; row < GRID_NY; row++) {
+        for (var col = 0; col < GRID_NX; col++) {
+          var loc = g.data[row * GRID_NX + col];
+          var v = loc ? ((loc.hourly || {})[GRID_VARS[kind]] || [])[g.startIdx + hour] : null;
+          var rgba = gridPalette(kind, v);
+          var o = (row * GRID_NX + col) * 4;
+          img.data[o] = rgba[0]; img.data[o + 1] = rgba[1]; img.data[o + 2] = rgba[2]; img.data[o + 3] = rgba[3];
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+      var big = document.createElement("canvas");
+      big.width = GRID_NX * 24; big.height = GRID_NY * 24;
+      var bctx = big.getContext("2d");
+      bctx.imageSmoothingEnabled = true;
+      bctx.imageSmoothingQuality = "high";
+      bctx.drawImage(small, 0, 0, big.width, big.height); // upscale = free bilinear smoothing
+      var url = big.toDataURL("image/png");
+      if (!future.overlays[kind]) {
+        future.overlays[kind] = L.imageOverlay(url, g.bounds, {
+          zIndex: kind === "clouds" ? 300 : kind === "cape" ? 310 : 320, opacity: 1
+        }).addTo(map);
+      } else {
+        future.overlays[kind].setUrl(url);
+        future.overlays[kind].setBounds(g.bounds);
+        if (!map.hasLayer(future.overlays[kind])) future.overlays[kind].addTo(map);
+      }
+    }
+
+    function removeOverlay(kind) {
+      if (future.overlays[kind] && map.hasLayer(future.overlays[kind])) map.removeLayer(future.overlays[kind]);
+    }
+
+    function activeGridKinds() {
+      return ["clouds", "precip", "cape"].filter(function (k) { return fel[k].checked; });
+    }
+
+    function fetchForecastGrid() {
+      var seq = ++future.fetchSeq;
+      var b = map.getBounds().pad(0.15);
+      var south = Math.max(-75, b.getSouth()), north = Math.min(80, b.getNorth());
+      var west = b.getWest(), east = b.getEast();
+      if (east - west > 358) { west = -179; east = 179; }
+      var lats = [], lons = [];
+      for (var row = 0; row < GRID_NY; row++) {
+        for (var col = 0; col < GRID_NX; col++) {
+          lats.push((north - (north - south) * (row + 0.5) / GRID_NY).toFixed(2));
+          lons.push((west + (east - west) * (col + 0.5) / GRID_NX).toFixed(2));
+        }
+      }
+      var url = "https://api.open-meteo.com/v1/forecast?latitude=" + lats.join(",") +
+                "&longitude=" + lons.join(",") +
+                "&hourly=cloud_cover,precipitation,cape&forecast_days=2&timezone=UTC";
+      fetch(url)
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (seq !== future.fetchSeq) return; // superseded by a newer viewport
+          if (!Array.isArray(data)) throw new Error(data.reason || "unexpected response");
+          var times = (data[0].hourly || {}).time || [];
+          var nowIso = new Date().toISOString().slice(0, 13); // "YYYY-MM-DDTHH"
+          var startIdx = 0;
+          for (var i = 0; i < times.length; i++) {
+            if (times[i].slice(0, 13) >= nowIso) { startIdx = i; break; }
+          }
+          future.grid = {
+            bounds: [[south, west], [north, east]],
+            times: times, startIdx: Math.min(startIdx, Math.max(0, times.length - FUTURE_HOURS - 1)),
+            data: data
+          };
+          if (future.on) activeGridKinds().forEach(function (k) { renderGridOverlay(k, future.index); });
+        })
+        .catch(function () { /* keep previous grid; retried on next move/toggle */ });
+    }
+
+    function futureTimeLabel(hour) {
+      var d;
+      var g = future.grid;
+      if (g && g.times[g.startIdx + hour]) d = new Date(g.times[g.startIdx + hour] + ":00Z");
+      else d = new Date(Date.now() + hour * 3600e3);
+      return '<span class="future">' + d.toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }) +
+             " (+" + hour + "h simulation)</span>";
+    }
+
+    function showFuture(hour) {
+      hour = Math.max(0, Math.min(hour, FUTURE_HOURS));
+      future.index = hour;
+      mountHrrrWindow(hour);
+      activeGridKinds().forEach(function (k) { renderGridOverlay(k, hour); });
+      el.time.innerHTML = futureTimeLabel(hour);
+      el.slider.value = String(hour);
+    }
+
+    function enterFuture() {
+      future.on = true;
+      pause();
+      Object.keys(state.tileLayers).forEach(function (key) { // hide live radar
+        map.removeLayer(state.tileLayers[key]); delete state.tileLayers[key];
+      });
+      fel.btn.innerHTML = "&#128225; Live";
+      fel.btn.classList.add("primary");
+      fel.row.style.display = "flex";
+      el.slider.max = String(FUTURE_HOURS);
+      if (!future.grid) fetchForecastGrid();
+      showFuture(0);
+      play();
+    }
+
+    function exitFuture() {
+      future.on = false;
+      pause();
+      Object.keys(future.hrrrLayers).forEach(function (h) {
+        map.removeLayer(future.hrrrLayers[h]); delete future.hrrrLayers[h];
+      });
+      ["clouds", "precip", "cape"].forEach(removeOverlay);
+      fel.btn.innerHTML = "&#128302; Future";
+      fel.btn.classList.remove("primary");
+      fel.row.style.display = "none";
+      el.slider.max = String(Math.max(0, state.frames.length - 1));
+      showFrame(state.pastCount > 0 ? state.pastCount - 1 : 0);
+      play();
+    }
+
+    fel.btn.addEventListener("click", function () {
+      if (future.on) exitFuture(); else enterFuture();
+    });
+
+    ["hrrr", "clouds", "precip", "cape"].forEach(function (k) {
+      fel[k].addEventListener("change", function () {
+        if (!future.on) return;
+        if (k !== "hrrr" && !fel[k].checked) removeOverlay(k);
+        if (k !== "hrrr" && fel[k].checked && !future.grid) fetchForecastGrid();
+        showFuture(future.index);
+      });
+    });
+
+    var moveTimer = null;
+    map.on("moveend", function () {
+      if (!future.on || !activeGridKinds().length) return;
+      clearTimeout(moveTimer);
+      moveTimer = setTimeout(fetchForecastGrid, 1200); // re-grid the new viewport
     });
 
     // ------------------------------- Hazards -------------------------------

@@ -16,6 +16,16 @@ designed to be shared privately across your devices with **Tailscale**.
 - Animated radar loop with play/pause, frame stepping, scrubber, and speed
   control
 - Satellite infrared layer as an alternative to precipitation radar
+- **Future simulation mode** (&#128302; Future button) — swaps the observed
+  loop for a 24-hour model simulation on the same timeline slider:
+  - **Future radar** — NOAA HRRR simulated reflectivity, the weather model's
+    own hour-by-hour prediction of what the radar will show (US, tiles via
+    [Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/))
+  - **Simulated satellite** — forecast cloud cover rendered as a smooth
+    cloud field in the browser from an Open-Meteo model grid (global)
+  - **Precipitation** and **storm energy (CAPE)** overlays from the same
+    grid (global); the grid re-samples automatically as you pan/zoom
+  - Press &#128225; Live to return to observed radar
 - **Hazard layers** (toggleable panel, top right):
   - **Weather alerts** — live NWS active alerts as color-coded polygons:
     tornado warnings (pulsing red), severe thunderstorms, floods, red flag /
