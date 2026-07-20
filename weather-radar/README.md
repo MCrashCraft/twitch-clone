@@ -93,6 +93,29 @@ alerts stay smooth on phones.
   in `index.html` — any open-data CAD feed with coordinates works.
 - **Speed control** — slider plus 0.5×/1×/2×/4× presets
 
+- **Region-scoped alerts** — "Only alerts in view" limits alert polygons,
+  counts and voice announcements to the visible map area, or drag a box with
+  **Select area** to lock a custom region. Spoken warnings include the
+  counties/cities/states from the official alert plus wind gust and hail
+  size when present.
+- **Street hazards from dispatch** — dispatch calls are auto-classified
+  (downed powerlines/electrical, gas/hazmat, fire, crash/rescue, medical)
+  with color-coded pins and a "street hazards only" filter.
+- **AMBER vehicle details** — suspect vehicle and license plate are
+  auto-extracted from alert text, shown in the banner and spelled out
+  letter-by-letter in the spoken alert.
+- **BOLO vehicle board** — be-on-the-lookout entries, auto-created from
+  AMBER alerts plus manual entries from the panel, stored in the public
+  SQLite database. (There is no public national police BOLO feed; this is a
+  hobby board fed by AMBER data + your own entries.)
+- **±24 h timeline** — Future mode now spans 24 hours *back* (archived
+  observed US radar via IEM + past model fields globally) through 24 hours
+  *forward* (HRRR + model simulation), on one slider with "now" in the
+  middle.
+- **7-day SQLite history** — `server.py` ingests warnings, AMBER alerts,
+  dispatch calls and fire incidents into `weather-radar.sqlite` every
+  5 minutes and purges anything older than 7 days.
+
 ## JSON API
 
 `server.py` serves the static site **and** a small aggregating JSON API with
@@ -107,6 +130,8 @@ CORS enabled (see `/api/status` for the list):
 | `/api/disasters` | global disaster alerts (GDACS) |
 | `/api/dispatch` | recent public-safety dispatch calls (normalized) |
 | `/api/point?lat=&lon=` | current weather + air quality + 24 h outlook |
+| `/api/history?hours=168&kind=` | 7-day SQLite history (warning/amber/dispatch/fire) |
+| `/api/bolo` (GET/POST) | BOLO vehicle board (POST `{"vehicle","plate","details"}`) |
 
 Responses are cached server-side for 1–15 minutes per feed to be polite to
 the upstream services.

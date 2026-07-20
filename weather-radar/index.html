@@ -72,10 +72,31 @@
     #status.visible { display: block; }
 
     #hazards {
-      top: 12px; right: 12px; padding: 10px 12px; width: 210px;
+      top: 12px; right: 12px; padding: 6px 12px 10px; width: 232px;
       font-size: 12px; max-height: calc(100% - 120px); overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: #3f3f46 transparent;
     }
     #hazards h2 { font-size: 12px; font-weight: 600; margin-bottom: 8px; color: #efeff1; letter-spacing: 0.03em; }
+    #hazards details { border-top: 1px solid rgba(255,255,255,0.07); padding: 2px 0 6px; }
+    #hazards details:first-child { border-top: none; }
+    #hazards summary {
+      cursor: pointer; list-style: none; user-select: none;
+      font-size: 12px; font-weight: 700; letter-spacing: 0.03em; color: #efeff1;
+      padding: 8px 0 5px; position: relative;
+    }
+    #hazards summary::-webkit-details-marker { display: none; }
+    #hazards summary:after {
+      content: "\25B8"; position: absolute; right: 2px; color: #85858f;
+      transition: transform 0.15s;
+    }
+    #hazards details[open] > summary:after { transform: rotate(90deg); }
+    #hazards summary:hover { color: #bf94ff; }
+    #hazards input[type="text"] {
+      width: 100%; margin: 3px 0; padding: 6px 8px; font-size: 12px;
+      background: #26262c; color: #efeff1; border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 6px; outline: none;
+    }
+    #hazards input[type="text"]:focus { border-color: #9147ff; }
     #hazards label { display: flex; align-items: center; gap: 7px; padding: 4px 0; color: #d3d3db; cursor: pointer; }
     #hazards input[type="checkbox"] { accent-color: #9147ff; }
     #alert-count { color: #adadb8; font-size: 11px; }
@@ -150,7 +171,8 @@
   <div id="amber-banner" class="panel"></div>
 
   <div id="hazards" class="panel">
-    <h2>&#128251; Radio (text-to-speech)</h2>
+    <details open>
+    <summary>&#128251; Radio (text-to-speech)</summary>
     <div class="swrow"><span>Voice weather alerts</span>
       <label class="switch"><input id="sw-radio" type="checkbox" /><i></i></label></div>
     <div class="sub">NOAA-radio style: warning tone, then new warnings &amp; AMBER alerts spoken aloud</div>
@@ -160,37 +182,72 @@
     <button id="btn-future-cast" style="width:100%; margin:4px 0 2px">&#128266; Simulated future broadcast</button>
     <div class="sub" style="margin-left:0">Speaks what an alert broadcast may sound like for the area in view, from model forecasts</div>
     <div id="amber-status" class="sub" style="margin-left:0">AMBER alerts: checking&hellip;</div>
-    <h2 style="margin-top:10px">&#9888;&#65039; Hazards</h2>
+    </details>
+    <details open>
+    <summary>&#9888;&#65039; Hazards</summary>
+    <div class="swrow"><span>Only alerts in view</span>
+      <label class="switch"><input id="chk-scope" type="checkbox" checked /><i></i></label></div>
+    <div class="row" style="gap:6px; padding:2px 0 4px; display:flex">
+      <button id="btn-area" class="preset">&#9645; Select area</button>
+      <button id="btn-area-clear" class="preset" style="display:none">&#10005; Clear area</button>
+    </div>
     <label><input id="chk-alerts" type="checkbox" checked /> Weather alerts <span id="alert-count"></span></label>
     <div class="sub">Tornado, severe storm, flood, fire, smoke &amp; air quality alerts (NWS, US only)</div>
     <label><input id="chk-wfigs" type="checkbox" checked /> Confirmed wildfires</label>
     <div class="sub">Real dispatched fire incidents with name, size &amp; containment (NIFC/WFIGS, North America&ndash;US)</div>
     <label><input id="chk-dispatch" type="checkbox" checked /> 911 dispatch calls</label>
-    <div class="sub">Live official public dispatch logs, pinpointed (Seattle Fire 911; legal open-data feeds &mdash; not call audio)</div>
+    <div class="sub">Live official public dispatch logs, pinpointed &amp; color-coded (Seattle Fire 911; legal open-data feeds &mdash; not call audio)</div>
+    <label><input id="chk-dispatch-hazonly" type="checkbox" /> Street hazards only</label>
+    <div class="sub">Downed powerlines / electrical, gas &amp; hazmat, fires, crashes</div>
     <label><input id="chk-fires" type="checkbox" /> Fire heat detections</label>
     <div class="sub">Satellite heat pixels, past day (NASA VIIRS)</div>
     <label><input id="chk-smoke" type="checkbox" /> Smoke / aerosol</label>
     <div class="sub">Aerosol optical depth, daily (NASA MODIS)</div>
     <label><input id="chk-aqi" type="checkbox" checked /> Click map for point report</label>
     <div class="sub">Current weather, air quality &amp; next-24h storm / wind / AQI outlook at any point on Earth (Open-Meteo)</div>
-    <h2 style="margin-top:10px">&#127757; Global</h2>
+    </details>
+    <details>
+    <summary>&#127757; Global</summary>
     <label><input id="chk-quakes" type="checkbox" checked /> Earthquakes (24 h)</label>
     <div class="sub">USGS worldwide, sized &amp; colored by magnitude</div>
     <label><input id="chk-gdacs" type="checkbox" checked /> Disaster alerts</label>
     <div class="sub">GDACS: tropical cyclones &amp; forecast tracks, floods, volcanoes, wildfires, droughts &mdash; green/orange/red severity</div>
-    <h2 style="margin-top:10px">&#128302; Predictions
-      <select id="sel-outlook-day" style="float:right; font-size:11px; padding:2px 4px;">
+    </details>
+    <details open>
+    <summary>&#128302; Predictions</summary>
+    <div class="swrow"><span>Outlook day</span>
+      <select id="sel-outlook-day" style="font-size:11px; padding:2px 4px;">
         <option value="1" selected>Day 1</option>
         <option value="2">Day 2</option>
         <option value="3">Day 3</option>
       </select>
-    </h2>
+    </div>
     <label><input id="chk-outlook" type="checkbox" /> Severe storm outlook</label>
     <div class="sub">SPC categorical risk, TSTM &rarr; HIGH (US)</div>
     <label><input id="chk-torprob" type="checkbox" /> Tornado probability</label>
     <div class="sub">SPC tornado risk, Day 1&ndash;2 only (US)</div>
     <label><input id="chk-fireout" type="checkbox" /> Fire weather outlook</label>
     <div class="sub">SPC elevated / critical fire risk, Day 1&ndash;2 (US)</div>
+    </details>
+    <details id="bolo-sec">
+    <summary>&#128663; BOLO vehicle board</summary>
+    <div id="bolo-list" class="sub" style="margin-left:0">Loading&hellip;</div>
+    <input id="bolo-vehicle" type="text" placeholder="Vehicle (e.g. red Ford F-150)" maxlength="90" />
+    <input id="bolo-plate" type="text" placeholder="Plate (optional)" maxlength="12" />
+    <button id="bolo-add" style="width:100%">Add BOLO</button>
+    <div class="sub" style="margin-left:0">AMBER-derived + manual entries, kept 7 days in the public SQLite database</div>
+    </details>
+    <details>
+    <summary>&#128451;&#65039; Data &amp; API</summary>
+    <div class="sub" style="margin-left:0">
+      Everything seen is stored 7 days in SQLite.<br>
+      <a href="api/history?hours=168" target="_blank" rel="noopener">/api/history</a> &middot;
+      <a href="api/bolo" target="_blank" rel="noopener">/api/bolo</a> &middot;
+      <a href="api/status" target="_blank" rel="noopener">all endpoints</a>
+    </div>
+    </details>
+    <details>
+    <summary>&#127912; Legend</summary>
     <div id="alert-legend">
       <div><i style="background:#ff1f1f"></i> Tornado</div>
       <div><i style="background:#ff8c00"></i> Severe thunderstorm</div>
@@ -198,8 +255,13 @@
       <div><i style="background:#ff4fa3"></i> Fire weather / red flag</div>
       <div><i style="background:#b0a06a"></i> Smoke / air quality</div>
       <div><i style="background:#e05238"></i> Extreme heat</div>
-      <div><i style="background:#b06bff"></i> Other</div>
+      <div><i style="background:#b06bff"></i> Other alert</div>
+      <div><i style="background:#ffd000"></i> Wires down / electrical call</div>
+      <div><i style="background:#66ff66"></i> Gas / hazmat call</div>
+      <div><i style="background:#ff5252"></i> Crash / rescue call</div>
+      <div><i style="background:#2ea8ff"></i> Medical call</div>
     </div>
+    </details>
   </div>
 
   <div id="controls" class="panel">
@@ -213,7 +275,7 @@
       <button id="btn-locate" title="Center map on my location">&#128205; My location</button>
     </div>
     <div class="row" id="future-row" style="display:none">
-      <label class="ctl"><input id="fchk-hrrr" type="checkbox" checked /> Future radar (US hi-res)</label>
+      <label class="ctl"><input id="fchk-hrrr" type="checkbox" checked /> Radar (US: archive + model)</label>
       <label class="ctl"><input id="fchk-precip" type="checkbox" checked /> Future radar (global)</label>
       <label class="ctl"><input id="fchk-clouds" type="checkbox" checked /> Simulated satellite (clouds)</label>
       <label class="ctl"><input id="fchk-cape" type="checkbox" /> Storm energy</label>
@@ -421,7 +483,7 @@
       el.play.innerHTML = "&#10074;&#10074; Pause";
       state.timer = setInterval(function () {
         if (future.on) {
-          showFuture((future.index + 1) % (FUTURE_HOURS + 1));
+          showFuture((future.index + 1) % SIM_STEPS);
         } else {
           var next = state.index + 1;
           if (next >= state.frames.length) next = 0;
@@ -487,19 +549,19 @@
 
     el.prev.addEventListener("click", function () {
       pause();
-      if (future.on) showFuture(future.index === 0 ? FUTURE_HOURS : future.index - 1);
+      if (future.on) showFuture(future.index === 0 ? SIM_STEPS - 1 : future.index - 1);
       else showFrame(state.index === 0 ? state.frames.length - 1 : state.index - 1);
     });
 
     el.next.addEventListener("click", function () {
       pause();
-      if (future.on) showFuture((future.index + 1) % (FUTURE_HOURS + 1));
+      if (future.on) showFuture((future.index + 1) % SIM_STEPS);
       else showFrame(state.index >= state.frames.length - 1 ? 0 : state.index + 1);
     });
 
     el.latest.addEventListener("click", function () {
       pause();
-      if (future.on) showFuture(0);
+      if (future.on) showFuture(SIM_PAST); // "now" on the simulation timeline
       else showFrame(state.pastCount > 0 ? state.pastCount - 1 : 0);
     });
 
@@ -577,7 +639,9 @@
     // forecast grid — simulated satellite (cloud cover), precipitation and
     // storm energy (CAPE) — which work anywhere on Earth.
 
-    var FUTURE_HOURS = 24;
+    var FUTURE_HOURS = 24;  // hours of model simulation ahead
+    var SIM_PAST = 24;      // hours of archive behind
+    var SIM_STEPS = SIM_PAST + FUTURE_HOURS + 1; // unified timeline index 0..48, "now" at 24
     var GRID_NX = 28, GRID_NY = 16; // 448 model points over the viewport, fetched in two batches
 
     var future = {
@@ -607,21 +671,34 @@
       });
     }
 
-    function mountHrrrWindow(hour) {
+    // Archived US composite radar for past hours (IEM keeps a tile archive)
+    function archiveRadarLayer(hoursAgo) {
+      var t = new Date(Math.floor((Date.now() + hoursAgo * 3600e3) / 3600e3) * 3600e3);
+      var ts = t.toISOString().slice(0, 13).replace(/[-T]/g, "") + "00";
+      return L.tileLayer("https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/ridge::USCOMP-N0Q-" + ts + "/{z}/{x}/{y}.png", {
+        opacity: 0, zIndex: 400, maxNativeZoom: 9, maxZoom: 19,
+        updateWhenZooming: false, keepBuffer: 1
+      });
+    }
+
+    // Unified sim timeline: index 0..48, hour = index - SIM_PAST.
+    // Past hours use archived observed radar; future hours use the HRRR model.
+    function mountSimWindow(index) {
       var want = {};
       if (fel.hrrr.checked) {
-        [hour - 1, hour, hour + 1].forEach(function (h) {
-          want[((h % (FUTURE_HOURS + 1)) + FUTURE_HOURS + 1) % (FUTURE_HOURS + 1)] = true;
+        [index - 1, index, index + 1].forEach(function (w) {
+          if (w >= 0 && w < SIM_STEPS) want[w] = true;
         });
       }
-      Object.keys(future.hrrrLayers).forEach(function (h) {
-        if (!want[h]) { map.removeLayer(future.hrrrLayers[h]); delete future.hrrrLayers[h]; }
+      Object.keys(future.hrrrLayers).forEach(function (w) {
+        if (!want[w]) { map.removeLayer(future.hrrrLayers[w]); delete future.hrrrLayers[w]; }
       });
-      Object.keys(want).forEach(function (h) {
-        if (!future.hrrrLayers[h]) {
-          future.hrrrLayers[h] = hrrrLayer(+h).addTo(map);
+      Object.keys(want).forEach(function (w) {
+        if (!future.hrrrLayers[w]) {
+          var h = +w - SIM_PAST;
+          future.hrrrLayers[w] = (h >= 0 ? hrrrLayer(h) : archiveRadarLayer(h)).addTo(map);
         }
-        future.hrrrLayers[h].setOpacity(+h === hour ? state.opacity : 0);
+        future.hrrrLayers[w].setOpacity(+w === index ? state.opacity : 0);
       });
     }
 
@@ -711,7 +788,7 @@
       function batch(la, lo) {
         return fetch("https://api.open-meteo.com/v1/forecast?latitude=" + la.join(",") +
                      "&longitude=" + lo.join(",") +
-                     "&hourly=cloud_cover,precipitation,cape&forecast_days=2&timezone=UTC")
+                     "&hourly=cloud_cover,precipitation,cape&past_days=1&forecast_days=2&timezone=UTC")
           .then(function (r) { return r.json(); });
       }
       var half = Math.floor(lats.length / 2);
@@ -726,13 +803,15 @@
           if (!Array.isArray(data) || !data[0] || !data[0].hourly) throw new Error("unexpected response");
           var times = (data[0].hourly || {}).time || [];
           var nowIso = new Date().toISOString().slice(0, 13); // "YYYY-MM-DDTHH"
-          var startIdx = 0;
+          var idxNow = 0;
           for (var i = 0; i < times.length; i++) {
-            if (times[i].slice(0, 13) >= nowIso) { startIdx = i; break; }
+            if (times[i].slice(0, 13) >= nowIso) { idxNow = i; break; }
           }
+          // startIdx points at "now − 24h" so unified index 0..48 maps directly
           future.grid = {
             bounds: [[south, west], [north, east]],
-            times: times, startIdx: Math.min(startIdx, Math.max(0, times.length - FUTURE_HOURS - 1)),
+            times: times,
+            startIdx: Math.max(0, Math.min(idxNow - SIM_PAST, times.length - SIM_STEPS)),
             data: data
           };
           if (future.on) activeGridKinds().forEach(function (k) { renderGridOverlay(k, future.index); });
@@ -740,22 +819,25 @@
         .catch(function () { /* keep previous grid; retried on next move/toggle */ });
     }
 
-    function futureTimeLabel(hour) {
+    function futureTimeLabel(index) {
+      var h = index - SIM_PAST;
       var d;
       var g = future.grid;
-      if (g && g.times[g.startIdx + hour]) d = new Date(g.times[g.startIdx + hour] + ":00Z");
-      else d = new Date(Date.now() + hour * 3600e3);
-      return '<span class="future">' + d.toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }) +
-             " (+" + hour + "h simulation)</span>";
+      if (g && g.times[g.startIdx + index]) d = new Date(g.times[g.startIdx + index] + ":00Z");
+      else d = new Date(Date.now() + h * 3600e3);
+      var when = d.toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" });
+      if (h < 0) return when + " (" + h + "h archive)";
+      if (h === 0) return '<span class="future">' + when + " (now)</span>";
+      return '<span class="future">' + when + " (+" + h + "h simulation)</span>";
     }
 
-    function showFuture(hour) {
-      hour = Math.max(0, Math.min(hour, FUTURE_HOURS));
-      future.index = hour;
-      mountHrrrWindow(hour);
-      activeGridKinds().forEach(function (k) { renderGridOverlay(k, hour); });
-      el.time.innerHTML = futureTimeLabel(hour);
-      el.slider.value = String(hour);
+    function showFuture(index) {
+      index = Math.max(0, Math.min(index, SIM_STEPS - 1));
+      future.index = index;
+      mountSimWindow(index);
+      activeGridKinds().forEach(function (k) { renderGridOverlay(k, index); });
+      el.time.innerHTML = futureTimeLabel(index);
+      el.slider.value = String(index);
     }
 
     function enterFuture() {
@@ -767,9 +849,9 @@
       fel.btn.innerHTML = "&#128225; Live";
       fel.btn.classList.add("primary");
       fel.row.style.display = "flex";
-      el.slider.max = String(FUTURE_HOURS);
+      el.slider.max = String(SIM_STEPS - 1);
       if (!future.grid) fetchForecastGrid();
-      showFuture(0);
+      showFuture(SIM_PAST); // start at "now", scrub back 24h or forward 24h
       play();
     }
 
@@ -901,6 +983,33 @@
       }
     });
 
+    // Alerts can be scoped to the visible map region, or to a hand-drawn box.
+    var alertScope = {
+      chk: document.getElementById("chk-scope"),
+      btnSel: document.getElementById("btn-area"),
+      btnClear: document.getElementById("btn-area-clear"),
+      selecting: false, start: null, rect: null, bounds: null,
+      zones: [], warnings: []
+    };
+
+    function scopeBounds() {
+      if (alertScope.bounds) return alertScope.bounds;
+      return alertScope.chk.checked ? map.getBounds() : null;
+    }
+
+    function renderAlerts() {
+      var sb = scopeBounds();
+      var inScope = function (f) { return !sb || !f.geometry || featureIntersectsMap(f, sb); };
+      var zones = alertScope.zones.filter(inScope);
+      var warnings = alertScope.warnings.filter(inScope);
+      alertsLayer.clearLayers();
+      alertsLayer.addData({ type: "FeatureCollection", features: zones });
+      alertsLayer.addData({ type: "FeatureCollection", features: warnings }); // warnings drawn on top
+      var total = alertScope.zones.length + alertScope.warnings.length;
+      var shown = zones.length + warnings.length;
+      hz.count.textContent = sb ? "(" + shown + " here / " + total + " US)" : "(" + total + " active)";
+    }
+
     function loadAlerts() {
       if (!hz.alerts.checked) return;
       // Zone alerts (watches/advisories/air quality) coarser, storm warnings finer.
@@ -909,15 +1018,58 @@
         fetch(wwaQuery(0, 0.01)).then(function (r) { return r.json(); })
       ])
         .then(function (results) {
-          var zones = results[0].features || [], warnings = results[1].features || [];
-          alertsLayer.clearLayers();
-          alertsLayer.addData({ type: "FeatureCollection", features: zones });
-          alertsLayer.addData({ type: "FeatureCollection", features: warnings }); // warnings drawn on top
-          hz.count.textContent = "(" + (zones.length + warnings.length) + " active)";
-          radioProcessWarnings(warnings);
+          alertScope.zones = results[0].features || [];
+          alertScope.warnings = results[1].features || [];
+          renderAlerts();
+          radioProcessWarnings(alertScope.warnings);
         })
         .catch(function () { hz.count.textContent = "(unavailable)"; });
     }
+
+    alertScope.chk.addEventListener("change", renderAlerts);
+    var scopeMoveTimer = null;
+    map.on("moveend", function () {
+      if (!alertScope.chk.checked || alertScope.bounds) return;
+      clearTimeout(scopeMoveTimer);
+      scopeMoveTimer = setTimeout(renderAlerts, 600);
+    });
+
+    // Drag-a-box area selection
+    alertScope.btnSel.addEventListener("click", function () {
+      alertScope.selecting = true;
+      alertScope.btnSel.textContent = "drag a box on the map…";
+      map.dragging.disable();
+      map.getContainer().style.cursor = "crosshair";
+    });
+    map.on("mousedown", function (e) {
+      if (!alertScope.selecting) return;
+      alertScope.start = e.latlng;
+      if (alertScope.rect) map.removeLayer(alertScope.rect);
+      alertScope.rect = L.rectangle(L.latLngBounds(e.latlng, e.latlng),
+        { color: "#9147ff", weight: 2, dashArray: "5 4", fillOpacity: 0.05 }).addTo(map);
+    });
+    map.on("mousemove", function (e) {
+      if (!alertScope.selecting || !alertScope.start) return;
+      alertScope.rect.setBounds(L.latLngBounds(alertScope.start, e.latlng));
+    });
+    map.on("mouseup", function () {
+      if (!alertScope.selecting || !alertScope.start) return;
+      alertScope.selecting = false;
+      alertScope.start = null;
+      alertScope.bounds = alertScope.rect.getBounds();
+      alertScope.btnSel.textContent = "▭ Select area";
+      alertScope.btnClear.style.display = "";
+      map.dragging.enable();
+      map.getContainer().style.cursor = "";
+      renderAlerts();
+    });
+    alertScope.btnClear.addEventListener("click", function () {
+      if (alertScope.rect) map.removeLayer(alertScope.rect);
+      alertScope.rect = null;
+      alertScope.bounds = null;
+      alertScope.btnClear.style.display = "none";
+      renderAlerts();
+    });
 
     function gibsWmsLayer(layerName, opacity, zIndex) {
       return L.tileLayer.wms(GIBS_WMS, {
@@ -1248,20 +1400,52 @@
       warnTone().then(function () { speak(text); });
     }
 
+    function shortArea(areaDesc) {
+      var parts = (areaDesc || "").split(";").map(function (s) { return s.trim(); }).filter(Boolean);
+      if (!parts.length) return "";
+      var head = parts.slice(0, 4).join(", ");
+      return parts.length > 4 ? head + ", and " + (parts.length - 4) + " more areas" : head;
+    }
+
+    // Announce with full detail: counties/cities/states from the CAP areaDesc,
+    // plus wind and hail parameters when the alert carries them.
+    function announceWarning(p) {
+      var base = "The National Weather Service has issued a " + (p.prod_type || "warning").trim();
+      var finish = function (extra) {
+        radioAnnounce(base + extra + " In effect until " + fmtWhen(p.expiration) + ".");
+      };
+      var url = (p.url || "").trim();
+      if (url.length < 10) return finish(".");
+      fetch(url, { headers: { Accept: "application/geo+json" } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var dp = (d && d.properties) || {};
+          var bits = "";
+          var area = shortArea(dp.areaDesc);
+          if (area) bits += " for " + area + ".";
+          var pr = dp.parameters || {};
+          if ((pr.maxWindGust || [])[0]) bits += " Winds up to " + pr.maxWindGust[0] + ".";
+          if ((pr.maxHailSize || [])[0]) bits += " Hail up to " + pr.maxHailSize[0] + " inches.";
+          finish(bits || ".");
+        })
+        .catch(function () { finish("."); });
+    }
+
     function radioProcessWarnings(features) {
       var ids = new Set(), fresh = [];
       features.forEach(function (f) {
         var id = ((f.properties.url || "") + (f.properties.prod_type || "") + (f.properties.onset || "")).trim();
         ids.add(id);
-        if (radio.seenWarn && !radio.seenWarn.has(id)) fresh.push(f.properties);
+        if (radio.seenWarn && !radio.seenWarn.has(id)) fresh.push(f);
       });
       var first = !radio.seenWarn;
       radio.seenWarn = ids;
       if (first || !radio.alerts.checked) return;
-      fresh.slice(0, 5).forEach(function (p) {
-        radioAnnounce("The National Weather Service has issued a " + (p.prod_type || "warning").trim() +
-                      ", in effect until " + fmtWhen(p.expiration) + ".");
-      });
+      var sb = scopeBounds(); // voice follows the same region scoping as the map
+      fresh
+        .filter(function (f) { return !sb || !f.geometry || featureIntersectsMap(f, sb); })
+        .slice(0, 5)
+        .forEach(function (f) { announceWarning(f.properties); });
     }
 
     radio.alerts.addEventListener("change", function () {
@@ -1276,6 +1460,13 @@
     });
 
     // ---- AMBER alerts (NWS Child Abduction Emergency feed) ----
+
+    // Best-effort vehicle/plate extraction from AMBER alert free text
+    function extractVehicle(text) {
+      var v = (text.match(/(?:vehicle(?: is)?(?: an?)?|driving(?: an?)?|traveling in(?: an?)?)[:\s]+([^.;\n]{4,90})/i) || [])[1];
+      var p = (text.match(/(?:license(?:\s+plate)?(?:\s+number)?|plate(?:\s+number)?|tag)[:#\s]+([A-Z0-9][A-Z0-9\- ]{2,9})/i) || [])[1];
+      return { vehicle: v && v.trim(), plate: p && p.trim() };
+    }
 
     var amberLayer = L.geoJSON(null, { style: { color: "#ff2d95", weight: 3, fillOpacity: 0.2 } }).addTo(map);
     var amberBanner = document.getElementById("amber-banner");
@@ -1295,17 +1486,26 @@
             return;
           }
           var p0 = feats[0].properties || {};
+          var ex0 = extractVehicle((p0.description || "") + " " + (p0.instruction || ""));
           amberStatus.textContent = "AMBER alerts: " + feats.length + " ACTIVE";
-          amberBanner.textContent = "AMBER ALERT — " + (p0.areaDesc || "").slice(0, 120);
+          amberBanner.textContent = "AMBER ALERT — " + (p0.areaDesc || "").slice(0, 100) +
+            (ex0.vehicle ? " — vehicle: " + ex0.vehicle : "") +
+            (ex0.plate ? " — plate: " + ex0.plate : "");
           amberBanner.classList.add("visible");
           feats.forEach(function (f) {
-            var id = (f.properties || {}).id || f.id || JSON.stringify(f.properties && f.properties.sent);
+            var fp = f.properties || {};
+            var id = fp.id || f.id || JSON.stringify(fp.sent);
             if (!radio.seenAmber[id]) {
               radio.seenAmber[id] = true;
               if (radio.alerts.checked) {
-                radioAnnounce("Amber alert. Child abduction emergency for " +
-                              ((f.properties || {}).areaDesc || "the affected area") + ". " +
-                              ((f.properties || {}).description || "").slice(0, 300));
+                var text = (fp.description || "") + " " + (fp.instruction || "");
+                var ex = extractVehicle(text);
+                var msg = "Amber alert. Child abduction emergency for " +
+                          (shortArea(fp.areaDesc) || "the affected area") + ".";
+                if (ex.vehicle) msg += " Suspect vehicle: " + ex.vehicle + ".";
+                if (ex.plate) msg += " License plate " + ex.plate.split("").join(" ") + ".";
+                msg += " " + (fp.description || "").slice(0, 260);
+                radioAnnounce(msg);
               }
             }
           });
@@ -1384,8 +1584,28 @@
     ];
 
     var dispatchChk = document.getElementById("chk-dispatch");
+    var dispatchHazOnly = document.getElementById("chk-dispatch-hazonly");
     var dispatchGroup = L.layerGroup().addTo(map);
-    var dispIcon = L.divIcon({ className: "disp-icon", html: '<span class="disp-dot"></span>', iconSize: [12, 12], iconAnchor: [6, 6] });
+
+    // Classify dispatch call types so street hazards stand out
+    function dispatchClass(t) {
+      t = (t || "").toLowerCase();
+      if (/wire|electric|power|pole|transformer/.test(t)) return { key: "wires", color: "#ffd000", label: "Wires down / electrical hazard" };
+      if (/gas|hazmat|spill|leak|odor|fuel/.test(t)) return { key: "hazmat", color: "#66ff66", label: "Gas / hazmat" };
+      if (/fire|smoke|brush|automatic alarm/.test(t)) return { key: "fire", color: "#ff6d00", label: "Fire response" };
+      if (/mvi|mva|collision|crash|rescue|extric|pedestrian|water rescue/.test(t)) return { key: "crash", color: "#ff5252", label: "Crash / rescue" };
+      if (/aid|medic|acuity/.test(t)) return { key: "medical", color: "#2ea8ff", label: "Medical response" };
+      return { key: "other", color: "#9e9e9e", label: "Other call" };
+    }
+    var HAZARD_KEYS = { wires: 1, hazmat: 1, fire: 1, crash: 1 };
+
+    function dispIconFor(cls) {
+      return L.divIcon({
+        className: "disp-icon",
+        html: '<span class="disp-dot" style="background:' + cls.color + '"></span>',
+        iconSize: [12, 12], iconAnchor: [6, 6]
+      });
+    }
 
     function loadDispatch() {
       if (!dispatchChk.checked) return;
@@ -1399,15 +1619,17 @@
             (rows || []).forEach(function (rec) {
               var call = feed.parse(rec);
               if (!call) return;
+              var cls = dispatchClass(call.type);
               var key = String(call.id);
               ids.add(key);
-              if (prev && !prev.has(key)) fresh.push(call);
-              var m = L.marker([call.lat, call.lon], { icon: dispIcon })
+              if (prev && !prev.has(key)) { call.cls = cls; fresh.push(call); }
+              if (dispatchHazOnly.checked && !HAZARD_KEYS[cls.key]) return;
+              var m = L.marker([call.lat, call.lon], { icon: dispIconFor(cls) })
                 .bindPopup(
-                  '<div class="ev" style="color:#2ea8ff">&#128680; ' + feed.label + "</div>" +
+                  '<div class="ev" style="color:' + cls.color + '">&#128680; ' + cls.label + "</div>" +
                   '<div style="margin:3px 0; font-weight:600">' + call.type + "</div>" +
-                  '<div class="meta">' + call.addr + "<br>Received " + call.timeText + " local &middot; #" + call.id +
-                  "<br>Official public dispatch log (not call audio)</div>",
+                  '<div class="meta">' + feed.label + "<br>" + call.addr + "<br>Received " + call.timeText +
+                  " local &middot; #" + call.id + "<br>Official public dispatch log (not call audio)</div>",
                   { maxWidth: 280 });
               m._feedId = feed.id;
               m.addTo(dispatchGroup);
@@ -1416,7 +1638,8 @@
             radio.seenCalls[feed.id] = ids;
             if (prev && radio.dispatchTts.checked) {
               fresh.slice(0, 4).forEach(function (c) {
-                speak(feed.label + " dispatch. " + c.type + ", " + c.addr + ".");
+                var lead = c.cls && HAZARD_KEYS[c.cls.key] ? c.cls.label + ". " : "";
+                speak(feed.label + " dispatch. " + lead + c.type + ", " + c.addr + ".");
               });
             }
           })
@@ -1429,6 +1652,49 @@
     });
     radio.dispatchTts.addEventListener("change", function () {
       if (radio.dispatchTts.checked) speak("Dispatch voice on. New public dispatch calls will be read aloud.");
+    });
+    dispatchHazOnly.addEventListener("change", loadDispatch);
+
+    // ---- BOLO vehicle board (server-backed, public SQLite, 7-day retention) ----
+
+    function escHtml(s) {
+      return String(s || "").replace(/[&<>"]/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+      });
+    }
+
+    function loadBolo() {
+      var list = document.getElementById("bolo-list");
+      fetch("api/bolo")
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.entries || !d.entries.length) { list.textContent = "No active BOLO entries."; return; }
+          list.innerHTML = d.entries.slice(0, 12).map(function (e) {
+            var age = Math.max(0, Math.round((Date.now() / 1000 - e.created) / 3600));
+            return '<div style="padding:2px 0"><b>' + escHtml(e.vehicle || "vehicle ?") + "</b>" +
+                   (e.plate ? ' &middot; plate <b style="color:#ffd000">' + escHtml(e.plate) + "</b>" : "") +
+                   ' <span style="color:#85858f">(' + escHtml((e.source || "").split(":")[0]) + ", " + age + "h ago)</span></div>";
+          }).join("");
+        })
+        .catch(function () { list.textContent = "BOLO board needs the server.py API (run via serve.sh)."; });
+    }
+
+    document.getElementById("bolo-add").addEventListener("click", function () {
+      var vehicle = document.getElementById("bolo-vehicle").value.trim();
+      var plate = document.getElementById("bolo-plate").value.trim();
+      if (!vehicle && !plate) return;
+      fetch("api/bolo", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vehicle: vehicle, plate: plate, details: "added from map UI" })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function () {
+          document.getElementById("bolo-vehicle").value = "";
+          document.getElementById("bolo-plate").value = "";
+          loadBolo();
+          if (radio.alerts.checked) speak("BOLO added to the board.");
+        })
+        .catch(function () {});
     });
 
     // ---- Simulated future broadcast: what a future alert may sound like ----
@@ -1521,6 +1787,8 @@
     setInterval(loadDispatch, 60 * 1000);
     pollAmber();
     setInterval(pollAmber, 2 * 60 * 1000);
+    loadBolo();
+    setInterval(loadBolo, 5 * 60 * 1000);
   </script>
 </body>
 </html>
