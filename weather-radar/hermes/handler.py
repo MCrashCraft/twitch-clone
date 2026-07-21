@@ -14,8 +14,8 @@ import urllib.request
 BASE_URL = os.environ.get("WEATHER_API_BASE", "https://weather-radar.tail9775d.ts.net").rstrip("/")
 
 ALLOWED = ("/api/nws-alerts", "/api/amber-alerts", "/api/noaa-radio",
-           "/api/911-public-calls", "/api/power-outages", "/api/gas-incidents",
-           "/api/hrrr-summary")
+           "/api/911-public-calls", "/api/cad", "/api/power-outages",
+           "/api/gas-incidents", "/api/hrrr-summary")
 
 
 def get_alerts(endpoint: str) -> dict:

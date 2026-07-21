@@ -335,50 +335,80 @@ _MOCK_CALL_TYPES = [
     ("Motor Vehicle Accident", "crash-rescue"), ("Aid Response", "medical"),
     ("Brush Fire", "fire"), ("Water Rescue", "crash-rescue"),
     ("Odor Investigation", "gas-hazmat"), ("Automatic Fire Alarm", "fire"),
+    ("Transformer Fire", "wires-electrical"), ("Fuel Spill", "gas-hazmat"),
 ]
 
+_MOCK_STREETS = ["Main St", "Maple Ave", "Church St", "Park Rd", "Washington St",
+                 "High St", "Oak Dr", "Mill Rd", "2nd St", "Franklin Ave",
+                 "Cherry Ln", "State Route 122", "Union Blvd", "Water St"]
 
-def _mock_calls(loc, n, categories=None):
+
+def _place_name(loc):
+    """Best local name for the chosen location, never a default city.
+    Empty string when only raw coordinates are known."""
+    name = (loc.get("city") or (loc.get("county") or "").replace(" County", "") or "")
+    if not name and loc.get("resolved_from") != "latlon":
+        name = loc.get("label") or ""
+    return name.split(",")[0].strip()
+
+
+def _sim_calls(loc, n, categories=None):
+    """Deterministic simulated CAD calls tailored to THIS location only.
+
+    Seeded by the resolved coordinates + day, so the same place always gets the
+    same data and different places always get different data.
+    """
     seed = _seed("calls", loc["lat"], loc["lon"])
+    place = _place_name(loc)
+    now = time.time()
     out = []
     for i in range(n):
         t, cat = _MOCK_CALL_TYPES[(seed[i] + i) % len(_MOCK_CALL_TYPES)]
         if categories and cat not in categories:
             continue
         minutes_ago = (seed[(i * 3) % 32] % 170) + 3
+        street = _MOCK_STREETS[(seed[(i * 2 + 1) % 32] + i) % len(_MOCK_STREETS)]
         out.append({
-            "id": "MOCK-%s-%03d" % (hashlib.md5(str((loc["lat"], loc["lon"], i)).encode()).hexdigest()[:6].upper(), i),
+            "id": "SIM-%s-%03d" % (hashlib.md5(str((loc["lat"], loc["lon"], i)).encode()).hexdigest()[:6].upper(), i),
             "type": t, "category": cat,
-            "address": "%d block, simulated street %d" % ((seed[i] % 90 + 1) * 100, i + 1),
+            "address": ("%d block %s" % ((seed[i] % 90 + 1) * 100, street)) + (", " + place if place else ""),
             "lat": round(loc["lat"] + (seed[(i * 5) % 32] - 128) / 3200.0, 4),
             "lon": round(loc["lon"] + (seed[(i * 7 + 1) % 32] - 128) / 3200.0, 4),
-            "time_local": datetime.now(timezone.utc).isoformat(timespec="minutes"),
-            "minutes_ago": minutes_ago, "feed": "mock", "status": "dispatched"})
+            "time_local": datetime.fromtimestamp(now - minutes_ago * 60, timezone.utc).isoformat(timespec="minutes"),
+            "minutes_ago": minutes_ago,
+            "feed": "simulated-" + re.sub(r"[^a-z0-9]+", "-", place.lower()).strip("-"),
+            "status": "dispatched"})
     return out
 
 
-def ep_911_calls(q):
+def _cad_response(endpoint, q, gas_only=False):
+    """Shared CAD logic: real feed if one covers the chosen location, else
+    simulated data for that location only. Never falls back to another city."""
     loc = resolve_location(q, required=True)
-    radius = min(float((q.get("radius_km", ["30"])[0]) or 30), 150)
+    radius = min(float((q.get("radius_km", ["50" if gas_only else "30"])[0]) or 30), 150)
     feed, calls = _real_calls_near(loc, radius)
-    if calls is not None:
-        return _envelope("911-public-calls", calls, loc,
+    if calls is not None:  # a real public feed covers the user's chosen location
+        if gas_only:
+            calls = [c for c in calls if c["category"] == "gas-hazmat"]
+        return _envelope(endpoint, calls, loc,
                          note="official public CAD dispatch logs (%s), not call audio" % feed["label"])
-    return _envelope("911-public-calls", _mock_calls(loc, 8), loc, mock=True,
-                     note="no free public real-time CAD feed covers this area; deterministic mock data. "
-                          "Real feeds configured: " + ", ".join(f["label"] for f in DISPATCH_FEEDS))
+    place = _place_name(loc) or loc["label"]
+    data = _sim_calls(loc, 10 if gas_only else 8, categories={"gas-hazmat"} if gas_only else None)
+    return _envelope(endpoint, data, loc, mock=True,
+                     note="no public real-time CAD feed exists for %s; deterministic "
+                          "simulated data generated for this location only" % place)
+
+
+def ep_911_calls(q):
+    return _cad_response("911-public-calls", q)
+
+
+def ep_cad(q):
+    return _cad_response("cad", q)
 
 
 def ep_gas_incidents(q):
-    loc = resolve_location(q, required=True)
-    radius = min(float((q.get("radius_km", ["50"])[0]) or 50), 150)
-    feed, calls = _real_calls_near(loc, radius)
-    if calls is not None:
-        gas = [c for c in calls if c["category"] == "gas-hazmat"]
-        return _envelope("gas-incidents", gas, loc,
-                         note="gas/hazmat dispatch calls from %s public CAD data" % feed["label"])
-    return _envelope("gas-incidents", _mock_calls(loc, 10, categories={"gas-hazmat"}), loc, mock=True,
-                     note="no free public feed covers this area; deterministic mock data")
+    return _cad_response("gas-incidents", q, gas_only=True)
 
 
 # ----------------------------------------------------------------------------
@@ -476,6 +506,7 @@ ROUTES = {
     "nws-alerts": ep_nws_alerts,
     "noaa-radio": ep_noaa_radio,
     "911-public-calls": ep_911_calls,
+    "cad": ep_cad,
     "power-outages": ep_power_outages,
     "gas-incidents": ep_gas_incidents,
     "hrrr-summary": ep_hrrr_summary,

@@ -40,9 +40,10 @@ Endpoints (all accept `lat=&lon=`, `zip=`, `city=[&state=]`, `county=[&state=]`,
 | `/api/nws-alerts` | active NWS alerts, point-filtered | real (api.weather.gov) |
 | `/api/amber-alerts` | AMBER alerts + extracted vehicle/plate | real (NWS CAE feed) |
 | `/api/noaa-radio` | NWR-style broadcast script for the location | real alerts → synthesized script |
-| `/api/911-public-calls` | public CAD dispatch calls near the point | real near Seattle; mock elsewhere (`"mock": true`) |
+| `/api/911-public-calls` | public CAD dispatch calls near the chosen point | real where a public feed covers the location; otherwise location-specific simulated data (`"mock": true`) |
+| `/api/cad` | alias of 911-public-calls (`?lat=&lon=`, `?city=`, `?county=`, `?zip=`) | same location-based logic |
 | `/api/power-outages` | outage list for county/point | mock (national feeds are paywalled) |
-| `/api/gas-incidents` | gas/hazmat dispatch calls | real near Seattle; mock elsewhere |
+| `/api/gas-incidents` | gas/hazmat dispatch calls | real where a feed covers the location; otherwise simulated for it |
 | `/api/hrrr-summary` | HRRR/GFS blend: storm risk, CAPE, gusts, precip, hourly | real (Open-Meteo) |
 
 Every response: `{endpoint, status, generated, mock, location, count, data[]}` —
