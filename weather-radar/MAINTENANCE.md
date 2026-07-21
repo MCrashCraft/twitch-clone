@@ -25,8 +25,7 @@ Funnel. Facts to know:
 
 | When (UTC) | Routine | What it does |
 | --- | --- | --- |
-| hourly at :37 | keepalive A | runs `keepalive.sh`: socket/HTTP health checks, restart what's dead, verify public 200 |
-| hourly at :07 | keepalive B | same script, 30 min staggered — worst-case downtime ~30 min |
+| hourly at :41 | keepalive | runs `keepalive.sh` (socket/HTTP health checks, restart what's dead, verify public 200). While the site is OFFLINE it re-arms itself every 10 minutes (one-shot `send_later` wakeups) until the public URL is back to 200, then returns to the hourly cadence. |
 | daily 09:30 | daily health check | curl every API endpoint (local + public), check upstream feeds (NWS, IEM, GIBS, Open-Meteo, Seattle CAD), DB size + 7-day purge sanity, disk usage, headless smoke-load of all 5 pages; fix + push what's broken |
 | weekly Sun 16:00 | improvement pass | pick the top item from the backlog below, implement, test headlessly, push, report briefly |
 
@@ -45,11 +44,15 @@ silent unless something is broken and can't be auto-fixed.
 4. Push notifications (Web Push) for new warnings in the saved location.
 5. Real power-outage integration behind an optional API key (PowerOutage.us),
    replacing the mock when a key is configured.
-6. Lightning strikes layer (Blitzortung public websocket) on the main map.
-7. Storm reports layer (SPC storm reports CSV — tornado/hail/wind reports).
+6. Storm reports layer (SPC storm reports CSV — tornado/hail/wind reports).
 8. PWA manifest + install prompt so the site works as a phone app.
 9. Per-page URL params (?loc=45320) so locations are shareable links.
 10. Wire the WebGPU renderer into the main map behind a settings toggle.
+
+## Done
+
+- Live lightning layer (Blitzortung websocket, strikes fade over 10 min,
+  soft-fail when the socket is unreachable) — main map, Global section.
 
 ## Manual checklist (occasionally)
 

@@ -221,6 +221,8 @@
     <div class="sub">USGS worldwide, sized &amp; colored by magnitude</div>
     <label><input id="chk-gdacs" type="checkbox" checked /> Disaster alerts</label>
     <div class="sub">GDACS: tropical cyclones &amp; forecast tracks, floods, volcanoes, wildfires, droughts &mdash; green/orange/red severity</div>
+    <label><input id="chk-lightning" type="checkbox" checked /> Live lightning</label>
+    <div class="sub">Blitzortung community network, real-time strikes fading over 10 min &mdash; <span id="lightning-status">connecting&hellip;</span></div>
     </details>
     <details open>
     <summary>&#128302; Predictions</summary>
@@ -1199,6 +1201,106 @@
       else map.removeLayer(gdacsGroup);
     });
 
+    // ------------------------- Live lightning (Blitzortung) -------------------------
+    // Community lightning-detection network. Streams strikes over a public
+    // websocket; payloads are LZW-packed JSON. Strikes render as bright dots
+    // that fade out over 10 minutes. Fails soft: if the socket can't connect
+    // (blocked network, server down), the layer just reports unavailable.
+
+    var lightning = {
+      chk: document.getElementById("chk-lightning"),
+      status: document.getElementById("lightning-status"),
+      servers: ["wss://ws1.blitzortung.org/", "wss://ws7.blitzortung.org/", "wss://ws8.blitzortung.org/"],
+      idx: 0, ws: null, strikes: [], group: L.layerGroup().addTo(map),
+      MAX: 1500, TTL_MS: 10 * 60 * 1000, retryTimer: null
+    };
+
+    function lzwDecode(d) {
+      var dict = {}, data = String(d).split("");
+      if (!data.length) return "";
+      var curr = data[0], old = curr, out = [curr], code = 256, phrase;
+      for (var i = 1; i < data.length; i++) {
+        var cc = data[i].charCodeAt(0);
+        phrase = cc < 256 ? data[i] : (dict[cc] ? dict[cc] : old + curr);
+        out.push(phrase);
+        curr = phrase.charAt(0);
+        dict[code++] = old + curr;
+        old = phrase;
+      }
+      return out.join("");
+    }
+
+    function lightningStatus(text) { lightning.status.textContent = text; }
+
+    function addStrike(lat, lon) {
+      var m = L.circleMarker([lat, lon], {
+        radius: 3.5, color: "#ffffff", weight: 1,
+        fillColor: "#ffe97a", fillOpacity: 1, opacity: 1
+      });
+      m.addTo(lightning.group);
+      lightning.strikes.push({ t: Date.now(), m: m });
+      if (lightning.strikes.length > lightning.MAX) {
+        var oldest = lightning.strikes.shift();
+        lightning.group.removeLayer(oldest.m);
+      }
+    }
+
+    function lightningConnect() {
+      if (!lightning.chk.checked || lightning.ws) return;
+      var url = lightning.servers[lightning.idx % lightning.servers.length];
+      lightning.idx++;
+      lightningStatus("connecting…");
+      var ws;
+      try { ws = new WebSocket(url); }
+      catch (e) { lightningStatus("unavailable"); return; }
+      lightning.ws = ws;
+      ws.onopen = function () {
+        ws.send('{"a":111}'); // subscribe to the global strike stream
+        lightningStatus("live");
+      };
+      ws.onmessage = function (ev) {
+        var obj = null;
+        try { obj = JSON.parse(ev.data); }
+        catch (e1) { try { obj = JSON.parse(lzwDecode(ev.data)); } catch (e2) { return; } }
+        if (obj && typeof obj.lat === "number" && typeof obj.lon === "number") {
+          addStrike(obj.lat, obj.lon);
+        }
+      };
+      ws.onclose = ws.onerror = function () {
+        if (lightning.ws !== ws) return;
+        lightning.ws = null;
+        lightningStatus("reconnecting…");
+        clearTimeout(lightning.retryTimer);
+        lightning.retryTimer = setTimeout(lightningConnect, 15000); // rotate servers
+      };
+    }
+
+    // Fade + expire loop, and a live 10-minute counter
+    setInterval(function () {
+      var now = Date.now(), kept = [];
+      lightning.strikes.forEach(function (s) {
+        var age = now - s.t;
+        if (age > lightning.TTL_MS) { lightning.group.removeLayer(s.m); return; }
+        var k = 1 - age / lightning.TTL_MS;
+        s.m.setStyle({ opacity: k, fillOpacity: k, radius: 2 + 1.5 * k });
+        kept.push(s);
+      });
+      lightning.strikes = kept;
+      if (lightning.ws) lightningStatus("live · " + kept.length + " strikes (10 min)");
+    }, 15000);
+
+    lightning.chk.addEventListener("change", function () {
+      if (lightning.chk.checked) {
+        lightning.group.addTo(map);
+        lightningConnect();
+      } else {
+        if (lightning.ws) { var w = lightning.ws; lightning.ws = null; w.close(); }
+        clearTimeout(lightning.retryTimer);
+        map.removeLayer(lightning.group);
+        lightningStatus("off");
+      }
+    });
+
     // --------------------------- Outlooks (predictions) ---------------------------
     // Official NOAA/SPC forecast polygons: where severe storms, tornadoes and
     // dangerous fire weather are predicted for the next days. The service
@@ -1798,6 +1900,7 @@
     setInterval(pollAmber, 2 * 60 * 1000);
     loadBolo();
     setInterval(loadBolo, 5 * 60 * 1000);
+    lightningConnect();
   </script>
 </body>
 </html>
