@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Downed Lines &amp; Outages — Weather Emergency Platform</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9889;</text></svg>" />
+<link rel="stylesheet" href="assets/site.css" />
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
+</head>
+<body>
+<nav class="topnav">
+  <span class="brand"><span class="dot"></span>Weather Emergency</span>
+  <a href="/">🗺 Map</a><a href="radio.html">📻 NOAA Radio</a>
+  <a href="911.html">🚒 911 Dispatch</a><a class="active" href="powerlines.html">⚡ Downed Lines</a>
+  <a href="amber.html">🚨 AMBER / BOLO</a><a href="api/status">API</a>
+</nav>
+<div class="wrap">
+  <header class="page">
+    <h1>⚡ Downed Lines, Gas &amp; Power</h1>
+    <p>Infrastructure hazards near your location: wires-down/electrical dispatch calls,
+       gas &amp; hazmat incidents, and power outages. Dispatch data is real where a public
+       feed exists (Seattle metro); outages are simulated until a keyed outage source is added.</p>
+  </header>
+
+  <div class="locbar">
+    <input id="loc-input" type="text" placeholder='ZIP, "City, ST", or "lat,lon"' />
+    <button id="loc-set" class="primary">Set location</button>
+    <button id="loc-mine">📍 My location</button>
+    <span id="loc-label" class="status-line" style="margin:0"></span>
+  </div>
+
+  <div id="minimap"></div>
+  <div class="status-line" id="status"></div>
+
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); align-items:start">
+    <div>
+      <h2 style="font-size:15px; margin:4px 0 10px">⚡ Wires down / electrical</h2>
+      <div id="wires" class="grid"></div>
+    </div>
+    <div>
+      <h2 style="font-size:15px; margin:4px 0 10px">☣ Gas &amp; hazmat</h2>
+      <div id="gas" class="grid"></div>
+    </div>
+    <div>
+      <h2 style="font-size:15px; margin:4px 0 10px">🔌 Power outages <span class="badge" style="background:#ffd24d">mock</span></h2>
+      <div id="outages" class="grid"></div>
+    </div>
+  </div>
+</div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="assets/site.js"></script>
+<script>
+"use strict";
+var map = L.map("minimap", { preferCanvas: true }).setView([39.5, -98.35], 4);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+  { attribution: "&copy; OSM &copy; CARTO", subdomains: "abcd", maxZoom: 19 }).addTo(map);
+var dots = L.layerGroup().addTo(map);
+
+function card(title, color, badge, metaHtml) {
+  return '<div class="card accent" style="--ac:' + color + '"><h3>' + title +
+    (badge ? ' <span class="badge" style="background:' + color + '">' + badge + "</span>" : "") +
+    '</h3><div class="meta">' + metaHtml + "</div></div>";
+}
+
+function dot(lat, lon, color, popup) {
+  if (lat == null) return;
+  L.circleMarker([lat, lon], { radius: 7, color: color, fillColor: color, fillOpacity: 0.7, weight: 1.5 })
+    .bindPopup(popup).addTo(dots);
+}
+
+function refresh() {
+  if (!WX.getLocation()) {
+    WX.needsLocation(document.getElementById("wires"));
+    document.getElementById("gas").innerHTML = document.getElementById("outages").innerHTML = "";
+    return;
+  }
+  Promise.all([
+    WX.api("/api/911-public-calls", "radius_km=80"),
+    WX.api("/api/gas-incidents", "radius_km=80"),
+    WX.api("/api/power-outages")
+  ]).then(function (res) {
+    var calls = res[0], gas = res[1], out = res[2];
+    var loc = calls.location || {};
+    if (loc.lat) map.setView([loc.lat, loc.lon], 10);
+    dots.clearLayers();
+
+    var wires = (calls.data || []).filter(function (c) { return c.category === "wires-electrical"; });
+    document.getElementById("wires").innerHTML = wires.slice(0, 12).map(function (c) {
+      dot(c.lat, c.lon, "#ffd000", "<b>" + WX.esc(c.type) + "</b><br>" + WX.esc(c.address));
+      return card(WX.esc(c.type), "#ffd000", calls.mock ? "mock" : "live",
+        WX.esc(c.address) + (c.distance_km != null ? " · " + c.distance_km + " km" : ""));
+    }).join("") || '<div class="card"><h3>None reported</h3><div class="meta">No wires-down or electrical-hazard calls in the current data.</div></div>';
+
+    document.getElementById("gas").innerHTML = (gas.data || []).slice(0, 12).map(function (c) {
+      dot(c.lat, c.lon, "#66ff66", "<b>" + WX.esc(c.type) + "</b><br>" + WX.esc(c.address));
+      return card(WX.esc(c.type), "#66ff66", gas.mock ? "mock" : "live",
+        WX.esc(c.address) + (c.distance_km != null ? " · " + c.distance_km + " km" : ""));
+    }).join("") || '<div class="card"><h3>None reported</h3><div class="meta">No gas or hazmat incidents in the current data.</div></div>';
+
+    document.getElementById("outages").innerHTML = (out.data || []).slice(0, 12).map(function (o) {
+      dot(o.lat, o.lon, "#ff8c00", "<b>" + WX.esc(o.utility) + "</b><br>" + o.customers_out + " customers out");
+      return card(WX.esc(o.utility), "#ff8c00", o.status,
+        "<b>" + o.customers_out.toLocaleString() + "</b> customers out · " + WX.esc(o.cause) +
+        "<br>" + WX.esc(o.county || "") + (o.state ? ", " + o.state : "") +
+        " · est. restore in ~" + o.est_restoration_minutes + " min");
+    }).join("");
+
+    document.getElementById("status").textContent =
+      wires.length + " electrical · " + (gas.count || 0) + " gas/hazmat · " + (out.count || 0) +
+      " outages (mock) · refreshes every 2 min";
+  }).catch(function () {
+    document.getElementById("status").textContent = "Fetch failed — retrying next cycle.";
+  });
+}
+
+WX.initLocBar(refresh);
+refresh();
+setInterval(refresh, 2 * 60 * 1000);
+</script>
+</body>
+</html>

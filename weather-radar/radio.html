@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NOAA Radio — Weather Emergency Platform</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128251;</text></svg>" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<nav class="topnav">
+  <span class="brand"><span class="dot"></span>Weather Emergency</span>
+  <a href="/">🗺 Map</a><a class="active" href="radio.html">📻 NOAA Radio</a>
+  <a href="911.html">🚒 911 Dispatch</a><a href="powerlines.html">⚡ Downed Lines</a>
+  <a href="amber.html">🚨 AMBER / BOLO</a><a href="api/status">API</a>
+</nav>
+<div class="wrap">
+  <header class="page">
+    <h1>📻 NOAA-style Weather Radio</h1>
+    <p>A synthesized weather-radio broadcast for your location, generated from the real
+       active National Weather Service alerts — attention tone, spoken bulletin, and the
+       full alert list. Not an actual NOAA transmission.</p>
+  </header>
+
+  <div class="locbar">
+    <input id="loc-input" type="text" placeholder='ZIP, "City, ST", or "lat,lon"' />
+    <button id="loc-set" class="primary">Set location</button>
+    <button id="loc-mine">📍 My location</button>
+    <span id="loc-label" class="status-line" style="margin:0"></span>
+    <span class="hint">Examples: 45320 · Eaton, OH · 39.75,-84.65</span>
+  </div>
+
+  <div class="card" style="margin-bottom:14px">
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+      <button id="play" class="primary">▶ Play broadcast</button>
+      <button id="stop">■ Stop</button>
+      <label class="swrow">Auto-play new alerts
+        <span class="switch"><input id="auto" type="checkbox" /><i></i></span></label>
+      <span id="radio-meta" class="count"></span>
+    </div>
+    <pre id="script" class="script" style="margin-top:12px">Set a location to generate the broadcast.</pre>
+  </div>
+
+  <div class="status-line" id="status"></div>
+  <div id="alerts" class="grid"></div>
+</div>
+
+<script src="assets/site.js"></script>
+<script>
+"use strict";
+var lastScriptId = null;
+
+function severityColor(s) {
+  return { Extreme: "#e91916", Severe: "#ff8c00", Moderate: "#ffd000", Minor: "#2ea8ff" }[s] || "#b06bff";
+}
+
+function refresh(auto) {
+  if (!WX.getLocation()) { WX.needsLocation(document.getElementById("alerts")); return; }
+  Promise.all([WX.api("/api/noaa-radio"), WX.api("/api/nws-alerts")]).then(function (res) {
+    var radio = res[0], alerts = res[1];
+    var item = (radio.data || [])[0] || {};
+    document.getElementById("script").textContent = item.script || "No broadcast available.";
+    document.getElementById("radio-meta").textContent =
+      (item.alerts_included || 0) + " alerts · ~" + (item.est_read_seconds || 0) + "s read · updated " +
+      new Date(radio.generated).toLocaleTimeString();
+    // Auto-play only when the broadcast actually changed
+    if (auto && document.getElementById("auto").checked && item.id && item.id !== lastScriptId) {
+      WX.announce(item.script);
+    }
+    lastScriptId = item.id;
+
+    var box = document.getElementById("alerts");
+    if (!(alerts.data || []).length) {
+      box.innerHTML = '<div class="card"><h3>✅ No active alerts</h3><div class="meta">Nothing in effect for this location right now.</div></div>';
+      return;
+    }
+    box.innerHTML = alerts.data.map(function (a) {
+      return '<div class="card accent" style="--ac:' + severityColor(a.severity) + '">' +
+        "<h3>" + WX.esc(a.event) + ' <span class="badge" style="background:' + severityColor(a.severity) + '">' + WX.esc(a.severity || "?") + "</span></h3>" +
+        '<div class="meta">' + WX.esc(a.areas) + "<br>Until " + WX.esc((a.expires || "?").slice(0, 16).replace("T", " ")) + "</div>" +
+        (a.instruction ? '<div class="desc"><b>Instructions:</b> ' + WX.esc(a.instruction) + "</div>" : "") +
+        (a.description ? '<div class="desc">' + WX.esc(a.description) + "</div>" : "") + "</div>";
+    }).join("");
+    document.getElementById("status").textContent = alerts.count + " active alerts · refreshes every 3 minutes";
+  }).catch(function () {
+    document.getElementById("status").textContent = "Data fetch failed — retrying on next cycle.";
+  });
+}
+
+document.getElementById("play").addEventListener("click", function () {
+  WX.announce(document.getElementById("script").textContent);
+});
+document.getElementById("stop").addEventListener("click", function () {
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+});
+
+WX.initLocBar(function () { refresh(false); });
+refresh(false);
+setInterval(function () { refresh(true); }, 3 * 60 * 1000);
+</script>
+</body>
+</html>

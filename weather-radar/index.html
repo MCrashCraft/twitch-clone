@@ -28,6 +28,9 @@
     #header .dot { width: 9px; height: 9px; border-radius: 50%; background: #e91916; animation: pulse 1.6s infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
     #header h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.02em; }
+    #pages { display: flex; gap: 2px; margin-left: 6px; padding-left: 10px; border-left: 1px solid rgba(255,255,255,0.12); }
+    #pages a { text-decoration: none; font-size: 14px; padding: 2px 5px; border-radius: 6px; }
+    #pages a:hover { background: #3f3f46; }
     #frame-time { font-size: 13px; color: #adadb8; font-variant-numeric: tabular-nums; }
     #frame-time .future { color: #58b8ff; }
 
@@ -165,6 +168,12 @@
     <span class="dot"></span>
     <h1>Live Weather Radar</h1>
     <span id="frame-time">loading&hellip;</span>
+    <span id="pages">
+      <a href="radio.html" title="NOAA-style radio broadcasts">&#128251;</a>
+      <a href="911.html" title="Public 911 dispatch">&#128657;</a>
+      <a href="powerlines.html" title="Downed lines, gas &amp; power">&#9889;</a>
+      <a href="amber.html" title="AMBER alerts &amp; BOLO board">&#128680;</a>
+    </span>
   </div>
 
   <div id="status" class="panel"></div>
