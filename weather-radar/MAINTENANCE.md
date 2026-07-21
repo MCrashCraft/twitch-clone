@@ -23,9 +23,9 @@ Funnel. Facts to know:
 | When (UTC) | Routine | What it does |
 | --- | --- | --- |
 | hourly at :42 | keepalive A | restart tailscaled/server if dead; verify public 200 |
-| hourly at :~12 | keepalive B | same, staggered ~30 min from A |
+| hourly at :31 | keepalive B | same check, second chance each hour (worst-case gap ~49 min) |
 | daily 09:30 | daily health check | curl every API endpoint (local + public), check upstream feeds (NWS, IEM, GIBS, Open-Meteo, Seattle CAD), DB size + 7-day purge sanity, disk usage, headless smoke-load of all 5 pages; fix + push what's broken |
-| weekly Sun 16:00 | improvement pass | pick the top item from the backlog below, implement, test headlessly, push |
+| weekly Sun 16:00 | improvement pass | pick the top item from the backlog below, implement, test headlessly, push, report briefly |
 
 Routines fire into the build session with full project context. They stay
 silent unless something is broken and can't be auto-fixed.
