@@ -31,7 +31,16 @@
 
   <div class="card" style="margin-bottom:14px">
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
-      <button id="play" class="primary">▶ Play broadcast</button>
+      <button id="onair" class="primary" style="background:#b4145a">&#128308; Go on air (24/7)</button>
+      <span id="onair-badge" style="display:none; color:#ff4d6d; font-weight:800; letter-spacing:0.08em; animation:pulse 1.4s infinite">&#9679; ON AIR</span>
+      <span id="now-playing" class="count"></span>
+    </div>
+    <div id="live-meta" class="count" style="margin-top:6px"></div>
+    <div class="count" style="margin-top:4px">24/7 mode loops the full broadcast cycle — station ID, conditions,
+      alerts (with warning tone), the official NWS forecast, outlook — refreshing data every cycle.
+      Keep this tab open; a screen wake-lock is requested while on air.</div>
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; border-top:1px solid rgba(255,255,255,0.08); padding-top:10px">
+      <button id="play">▶ Play once</button>
       <button id="stop">■ Stop</button>
       <label class="swrow">Auto-play new alerts
         <span class="switch"><input id="auto" type="checkbox" /><i></i></span></label>
@@ -39,6 +48,7 @@
     </div>
     <pre id="script" class="script" style="margin-top:12px">Set a location to generate the broadcast.</pre>
   </div>
+  <style>@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }</style>
 
   <div class="status-line" id="status"></div>
   <div id="alerts" class="grid"></div>
@@ -63,8 +73,8 @@ function refresh(auto) {
       (item.alerts_included || 0) + " alerts · ~" + (item.est_read_seconds || 0) + "s read · updated " +
       new Date(radio.generated).toLocaleTimeString();
     // Auto-play only when the broadcast actually changed
-    if (auto && document.getElementById("auto").checked && item.id && item.id !== lastScriptId) {
-      WX.announce(item.script);
+    if (auto && document.getElementById("auto").checked && item.id && item.id !== lastScriptId && !live.on) {
+      WX.announce(item.script); // suppressed while the 24/7 loop owns the speech channel
     }
     lastScriptId = item.id;
 
@@ -86,14 +96,131 @@ function refresh(auto) {
   });
 }
 
+// ---------------- 24/7 continuous broadcast (NWR-style loop) ----------------
+// Speaks the API's segment cycle end-to-end, then refetches fresh data and
+// starts the next cycle — indefinitely. Long text is chunked into short
+// utterances (avoids browser speech cutoffs) and every chunk carries a
+// duration-based fallback timer so the loop can never stall, even if the
+// speech engine drops an onend event (or has no voices at all).
+
+var live = { on: false, cycle: 0, segIdx: 0, segs: [], wakeLock: null, resumeTimer: null };
+
+var SEGMENT_LABELS = { station: "Station ID", conditions: "Current conditions", alerts: "Hazards summary",
+                       forecast: "NWS forecast", outlook: "Storm outlook", signoff: "Sign-off" };
+
+function speakChunks(text, onDone) {
+  var sentences = String(text).match(/[^.!?]+[.!?]+\s*|[^.!?]+$/g) || [String(text)];
+  var chunks = [];
+  sentences.forEach(function (s) {
+    if (chunks.length && (chunks[chunks.length - 1].length + s.length) < 220) chunks[chunks.length - 1] += s;
+    else chunks.push(s);
+  });
+  var i = 0;
+  (function next() {
+    if (!live.on) return;
+    if (i >= chunks.length) { setTimeout(onDone, 400); return; } // brief inter-segment gap
+    var c = chunks[i++];
+    var start = Date.now();
+    var done = false;
+    // Real-time pacing is enforced even if the speech engine finishes early,
+    // errors instantly, or has no voices at all — otherwise a silent engine
+    // would race through cycles and hammer the API.
+    var minMs = Math.max(2000, (c.split(/\s+/).length / 2.6) * 1000);
+    var maxMs = minMs * 1.8 + 6000; // hard fallback if onend never fires
+    var advance = function () { if (!done) { done = true; clearTimeout(maxTimer); next(); } };
+    var maxTimer = setTimeout(advance, maxMs);
+    var onSpoken = function () {
+      var wait = minMs - (Date.now() - start);
+      if (wait > 0) setTimeout(advance, wait); else advance();
+    };
+    if ("speechSynthesis" in window) {
+      var u = new SpeechSynthesisUtterance(c);
+      u.rate = 0.95; u.pitch = 0.9;
+      u.onend = onSpoken; u.onerror = onSpoken;
+      try { speechSynthesis.speak(u); } catch (e) { onSpoken(); }
+    } else {
+      onSpoken();
+    }
+  })();
+}
+
+function airSegment() {
+  if (!live.on) return;
+  if (live.segIdx >= live.segs.length) { live.cycle++; fetchCycle(); return; }
+  var seg = live.segs[live.segIdx++];
+  document.getElementById("now-playing").textContent =
+    "now: " + (SEGMENT_LABELS[seg.name] || seg.name) + " (" + live.segIdx + "/" + live.segs.length + ")";
+  var go = function () { speakChunks(seg.text, airSegment); };
+  if (seg.tone) WX.tone().then(go); else go();
+}
+
+function fetchCycle() {
+  if (!live.on) return;
+  WX.api("/api/noaa-radio").then(function (d) {
+    var item = (d.data || [])[0] || {};
+    live.segs = item.segments && item.segments.length ? item.segments
+      : [{ name: "alerts", text: item.script || "No broadcast data available. Retrying next cycle." }];
+    live.segIdx = 0;
+    document.getElementById("live-meta").textContent =
+      "cycle " + (live.cycle + 1) + " · ~" + Math.round((item.est_read_seconds || 60) / 60) + " min per cycle · " +
+      (item.alerts_included || 0) + " alerts" + (item.has_warning ? " · ⚠ WARNING ACTIVE" : "") +
+      " · data refreshed " + new Date().toLocaleTimeString();
+    airSegment();
+  }).catch(function () {
+    document.getElementById("live-meta").textContent = "data fetch failed — retrying in 20s (still on air)";
+    setTimeout(fetchCycle, 20000);
+  });
+}
+
+function goOnAir() {
+  if (!WX.getLocation()) { document.getElementById("live-meta").textContent = "Set a location first."; return; }
+  live.on = true; live.cycle = 0;
+  document.getElementById("onair").innerHTML = "&#9632; Go off air";
+  document.getElementById("onair-badge").style.display = "";
+  if ("speechSynthesis" in window) {
+    speechSynthesis.cancel();
+    // Chrome workaround: periodic resume() keeps long sessions from pausing
+    live.resumeTimer = setInterval(function () { try { speechSynthesis.resume(); } catch (e) {} }, 10000);
+  }
+  if (navigator.wakeLock && navigator.wakeLock.request) {
+    navigator.wakeLock.request("screen")
+      .then(function (wl) { live.wakeLock = wl; })
+      .catch(function () {});
+  }
+  fetchCycle();
+}
+
+function goOffAir() {
+  live.on = false;
+  clearInterval(live.resumeTimer);
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  if (live.wakeLock) { live.wakeLock.release().catch(function () {}); live.wakeLock = null; }
+  document.getElementById("onair").innerHTML = "&#128308; Go on air (24/7)";
+  document.getElementById("onair-badge").style.display = "none";
+  document.getElementById("now-playing").textContent = "";
+  document.getElementById("live-meta").textContent = "off air";
+}
+
+document.getElementById("onair").addEventListener("click", function () {
+  if (live.on) goOffAir(); else goOnAir();
+});
+// Re-acquire the wake lock when the tab becomes visible again
+document.addEventListener("visibilitychange", function () {
+  if (live.on && document.visibilityState === "visible" && navigator.wakeLock && navigator.wakeLock.request) {
+    navigator.wakeLock.request("screen").then(function (wl) { live.wakeLock = wl; }).catch(function () {});
+  }
+});
+
 document.getElementById("play").addEventListener("click", function () {
+  if (live.on) return; // the 24/7 loop owns the speech channel
   WX.announce(document.getElementById("script").textContent);
 });
 document.getElementById("stop").addEventListener("click", function () {
-  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  if (live.on) goOffAir();
+  else if ("speechSynthesis" in window) speechSynthesis.cancel();
 });
 
-WX.initLocBar(function () { refresh(false); });
+WX.initLocBar(function () { refresh(false); if (live.on) { live.cycle = 0; } });
 refresh(false);
 setInterval(function () { refresh(true); }, 3 * 60 * 1000);
 </script>

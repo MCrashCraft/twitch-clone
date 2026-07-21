@@ -257,33 +257,170 @@ def ep_amber_alerts(q):
 # NOAA-radio-style broadcast script (synthesized from real alerts)
 # ----------------------------------------------------------------------------
 
+_WMO_TEXT = {
+    0: "clear skies", 1: "mostly clear skies", 2: "partly cloudy skies", 3: "overcast skies",
+    45: "fog", 48: "freezing fog", 51: "light drizzle", 53: "drizzle", 55: "heavy drizzle",
+    56: "freezing drizzle", 57: "freezing drizzle", 61: "light rain", 63: "rain", 65: "heavy rain",
+    66: "freezing rain", 67: "freezing rain", 71: "light snow", 73: "snow", 75: "heavy snow",
+    77: "snow grains", 80: "rain showers", 81: "rain showers", 82: "heavy rain showers",
+    85: "snow showers", 86: "snow showers", 95: "thunderstorms", 96: "thunderstorms with hail",
+    99: "thunderstorms with heavy hail",
+}
+
+_COMPASS = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"]
+
+
+def _radio_conditions_text(loc):
+    """Current-conditions segment (global, Open-Meteo). US listeners get
+    Fahrenheit/mph to match the NWS forecast segment; everyone else metric."""
+    us = bool(loc.get("state"))
+    try:
+        url = ("https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
+               "&current=temperature_2m,apparent_temperature,relative_humidity_2m,"
+               "wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code&timezone=UTC"
+               % (loc["lat"], loc["lon"]))
+        if us:
+            url += "&temperature_unit=fahrenheit&wind_speed_unit=mph"
+        d = _cached("radiocond:%s,%s,%s" % (loc["lat"], loc["lon"], us), 600, lambda: _fetch_json(url))
+        c = d.get("current", {})
+        t = c.get("temperature_2m")
+        if t is None:
+            return None
+        feels = c.get("apparent_temperature")
+        feels = t if feels is None else feels  # explicit: 0 degrees is a real value
+        parts = ["Current conditions: %s." % _WMO_TEXT.get(c.get("weather_code"), "variable skies"),
+                 "Temperature %d degrees %s, feels like %d." %
+                 (round(t), "Fahrenheit" if us else "Celsius", round(feels))]
+        ws, wg, wd = c.get("wind_speed_10m"), c.get("wind_gusts_10m"), c.get("wind_direction_10m")
+        if ws is not None:
+            sent = "Winds"
+            if wd is not None:
+                sent += " from the %s" % _COMPASS[int((wd + 22.5) // 45) % 8]
+            sent += " at %d %s" % (round(ws), "miles per hour" if us else "kilometers per hour")
+            if wg is not None:
+                sent += ", gusting to %d" % round(wg)
+            parts.append(sent + ".")
+        rh = c.get("relative_humidity_2m")
+        if rh is not None:
+            parts.append("Relative humidity %d percent." % round(rh))
+        return " ".join(parts)
+    except Exception:
+        return None
+
+
+def _nws_forecast_text(loc):
+    """Official NWS forecast periods, in the NWS's own wording (US only)."""
+    try:
+        pt = _cached("nwspt:%.2f,%.2f" % (loc["lat"], loc["lon"]), 6 * 3600, lambda: _fetch_json(
+            "https://api.weather.gov/points/%.4f,%.4f" % (loc["lat"], loc["lon"])))
+        furl = pt["properties"]["forecast"]
+        fc = _cached("nwsfc:" + furl, 1800, lambda: _fetch_json(furl))
+        periods = fc["properties"]["periods"][:4]
+        if not periods:
+            return None
+        parts = ["Now the official National Weather Service forecast."]
+        for p in periods:
+            parts.append("%s. %s" % (p.get("name"), p.get("detailedForecast") or p.get("shortForecast") or ""))
+        return " ".join(parts)
+    except Exception:
+        return None
+
+
+def _radio_outlook_text(q, loc):
+    """Short-term storm outlook from the HRRR summary (units match the listener)."""
+    try:
+        s = ep_hrrr_summary(q)["data"][0]
+        if s["storm_risk"] in (None, "none"):
+            return ("The short term outlook: no significant storm activity is expected "
+                    "over the next %s hours." % s.get("horizon_hours", 18))
+        gust_kmh = s.get("max_gust_kmh") or 0
+        gust_txt = ("%d miles per hour" % round(gust_kmh * 0.621371)
+                    if loc.get("state") else "%d kilometers per hour" % round(gust_kmh))
+        return ("The short term outlook: storm risk is %s. Peak storm energy near %s joules "
+                "per kilogram, with wind gusts to %s and up to a %s percent "
+                "chance of precipitation." %
+                (s["storm_risk"], round(s.get("max_cape_jkg") or 0),
+                 gust_txt, s.get("max_precip_prob_pct") or 0))
+    except Exception:
+        return None
+
+
 def ep_noaa_radio(q):
+    """A full continuous-broadcast cycle, NWR style: station ID, current
+    conditions, alerts (tone-flagged when warnings are active), the official
+    NWS forecast, short-term outlook, sign-off. The radio page loops these
+    segments 24/7, refetching between cycles."""
     loc = resolve_location(q, required=True)
-    alerts = ep_nws_alerts(q)["data"]
-    lines = ["This is a synthesized weather radio broadcast for %s." % loc["label"]]
-    if not alerts:
-        lines.append("No active watches, warnings or advisories for this location. "
-                     "Stay weather aware.")
+    # Alerts must degrade, not fail: outside NWS coverage (or during an
+    # api.weather.gov outage) the rest of the broadcast still airs.
+    try:
+        alerts = ep_nws_alerts(q)["data"]
+        alerts_ok = True
+    except Exception:
+        alerts, alerts_ok = [], False
+
+    def _alert_rank(a):
+        ev = (a.get("event") or "").lower()
+        return 0 if "warning" in ev else (1 if "watch" in ev else 2)
+    alerts.sort(key=_alert_rank)  # warnings first, so they are always spoken
+    has_warning = any("warning" in (a.get("event") or "").lower() for a in alerts)
+
+    segments = [{"name": "station", "text":
+                 "This is the Weather Emergency Platform automated weather radio service for %s. "
+                 "Broadcasting continuously. Data refreshes every cycle." % loc["label"]}]
+
+    cond = _radio_conditions_text(loc)
+    if cond:
+        segments.append({"name": "conditions", "text": cond})
+
+    if not alerts_ok:
+        alert_text = ("Official alert information is not available for this location. "
+                      "Alert coverage on this broadcast is provided by the U.S. National "
+                      "Weather Service; the broadcast will keep retrying each cycle.")
+    elif not alerts:
+        alert_text = ("There are no active watches, warnings or advisories for this location "
+                      "at this time.")
     else:
-        lines.append("There %s %d active alert%s." %
-                     ("is" if len(alerts) == 1 else "are", len(alerts), "" if len(alerts) == 1 else "s"))
+        # Point-filtered query: every alert here covers the listener's location,
+        # so say so — naming areaDesc's first zone (often far away) misleads.
+        lines = ["Now the hazardous weather summary for %s. There %s %d active alert%s." %
+                 (loc["label"], "is" if len(alerts) == 1 else "are",
+                  len(alerts), "" if len(alerts) == 1 else "s")]
         for a in alerts[:6]:
-            seg = "%s for %s." % (a["event"], (a["areas"] or "the area").split(";")[0])
+            seg = "%s, in effect for this area." % a["event"]
             if a["expires"]:
-                seg += " In effect until %s." % a["expires"][:16].replace("T", " at ")
+                seg += " Until %s." % a["expires"][:16].replace("T", " at ")
             if a["instruction"]:
                 seg += " " + a["instruction"].split(".")[0] + "."
             lines.append(seg)
-        lines.append("Repeating: %d active alert%s for %s." %
-                     (len(alerts), "" if len(alerts) == 1 else "s", loc["label"]))
-    script = " ".join(lines)
+        if len(alerts) > 6:
+            lines.append("Plus %d additional alert%s also in effect for this area." %
+                         (len(alerts) - 6, "" if len(alerts) - 6 == 1 else "s"))
+        alert_text = " ".join(lines)
+    segments.append({"name": "alerts", "text": alert_text, "tone": has_warning})
+
+    fc = _nws_forecast_text(loc)
+    if fc:
+        segments.append({"name": "forecast", "text": fc})
+    outlook = _radio_outlook_text(q, loc)
+    if outlook:
+        segments.append({"name": "outlook", "text": outlook})
+
+    segments.append({"name": "signoff", "text":
+                     "That completes this broadcast cycle for %s. The broadcast repeats "
+                     "continuously with fresh data. Stay weather aware." % loc["label"]})
+
+    script = " ".join(s["text"] for s in segments)
+    words = len(script.split())
     item = {"id": "nwr-%s-%d" % (hashlib.md5(script.encode()).hexdigest()[:10], len(alerts)),
-            "script": script, "alerts_included": len(alerts),
-            "word_count": len(script.split()), "est_read_seconds": round(len(script.split()) / 2.6),
+            "script": script, "segments": segments, "has_warning": has_warning,
+            "alerts_included": len(alerts), "alerts_spoken": min(6, len(alerts)),
+            "alerts_available": alerts_ok, "word_count": words,
+            "est_read_seconds": round(words / 2.6),
             "attention_tone_hz": 1050, "status": "ready"}
     return _envelope("noaa-radio", [item], loc,
-                     note="NWR-style script generated from real active alerts; "
-                          "not an actual NOAA Weather Radio transmission")
+                     note="NWR-style continuous broadcast cycle generated from real data "
+                          "(alerts, conditions, official NWS forecast); not an actual NOAA transmission")
 
 
 # ----------------------------------------------------------------------------

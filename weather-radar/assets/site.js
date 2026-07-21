@@ -91,7 +91,18 @@ var WX = (function () {
     window.speechSynthesis.speak(u);
   }
 
-  function announce(text) { tone().then(function () { speak(text); }); }
+  // Announcements are cancellable: cancelSpeech() invalidates any pending
+  // tone->speak chain (otherwise a queued announcement fires seconds after a
+  // cancel, e.g. injecting the one-shot script into the live broadcast).
+  var announceSeq = 0;
+  function announce(text) {
+    var s = ++announceSeq;
+    tone().then(function () { if (s === announceSeq) speak(text); });
+  }
+  function cancelSpeech() {
+    announceSeq++;
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  }
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
@@ -106,5 +117,5 @@ var WX = (function () {
 
   return { parseLocation: parseLocation, getLocation: getLocation, setLocation: setLocation,
            api: api, initLocBar: initLocBar, tone: tone, speak: speak, announce: announce,
-           esc: esc, needsLocation: needsLocation };
+           cancelSpeech: cancelSpeech, esc: esc, needsLocation: needsLocation };
 })();
