@@ -31,6 +31,8 @@ import urllib.request
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
+import platform_api  # Weather Emergency Platform endpoints (location-aware)
+
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "weather-radar.sqlite"
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8777
@@ -262,11 +264,18 @@ class Handler(SimpleHTTPRequestHandler):
         name = parsed.path[len("/api/"):].strip("/")
         q = urllib.parse.parse_qs(parsed.query)
         try:
+            if name in platform_api.ROUTES:
+                try:
+                    return self.send_json(platform_api.handle(name, q))
+                except platform_api.LocationError as exc:
+                    return self.send_json({"status": "error", "error": str(exc),
+                                           "hint": "pass lat+lon, zip, city[&state], county[&state], or state"}, 400)
             if name == "status":
                 return self.send_json({
                     "ok": True, "uptime_s": int(time.time() - START),
                     "db": DB_PATH.name, "retention_days": 7,
                     "endpoints": ["/api/" + k for k in list(UPSTREAM)] +
+                                 ["/api/" + k + "?lat=&lon=|zip=|city=|state=" for k in platform_api.ROUTES] +
                                  ["/api/point?lat=&lon=", "/api/history?hours=168&kind=",
                                   "/api/bolo (GET, POST)", "/api/status"],
                 })
