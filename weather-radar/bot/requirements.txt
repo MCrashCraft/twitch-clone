@@ -1,4 +1,0 @@
-discord.py>=2.3
-aiohttp>=3.9
-# optional — spoken MP3 attachments (free Microsoft neural voices):
-edge-tts>=6.1
