@@ -73,3 +73,18 @@ silent unless something is broken and can't be auto-fixed.
 - Check `/api/status` uptime and `weather-radar.sqlite` size.
 - Revoke/rotate any Tailscale auth keys not in use.
 - Review BOLO board for junk (public POST endpoint): `DELETE` via sqlite3 if needed.
+
+## MWES (2026-07-21)
+
+The radio is now The Official MCrashCraft Weather Emergency Service (MWES):
+fixed autism-friendly announcement template (MWES intro / type / location /
+time / details / "End of message."), dual formats everywhere (12h+24h,
+mph+km/h, °F+°C), per-alert separated segments, 60-second EAS watcher that
+interrupts with the 853+960 Hz attention signal for one new alert then
+resumes, MWES early warnings from model data (/api/early-warnings, always
+labeled forecasts), safety alerts (/api/safety-alerts: AMBER + Blue Alert
+with person/vehicle extraction), and a reports/records system
+(/api/reports GET/POST: amber, missing-child, missing-adult, blue, bolo —
+geocoded pinpoints, active until cancelled, cancellations announced).
+Natural-voice picker with persisted choice; animated mini radar on the
+radio page.

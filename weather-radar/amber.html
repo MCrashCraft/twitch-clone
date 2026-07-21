@@ -11,14 +11,16 @@
   <span class="brand"><span class="dot"></span>Weather Emergency</span>
   <a href="/">🗺 Map</a><a href="radio.html">📻 NOAA Radio</a>
   <a href="911.html">🚒 911 Dispatch</a><a href="powerlines.html">⚡ Downed Lines</a>
-  <a class="active" href="amber.html">🚨 AMBER / BOLO</a><a href="api/status">API</a>
+  <a class="active" href="amber.html">🚨 Alerts & Reports</a><a href="api/status">API</a>
 </nav>
 <div class="wrap">
   <header class="page">
-    <h1>🚨 AMBER Alerts &amp; BOLO Board</h1>
-    <p>Live AMBER alerts from the official NWS Child Abduction Emergency feed, with suspect
-       vehicle and plate auto-extracted — plus the hobby be-on-the-lookout vehicle board
-       (AMBER-derived + manual entries, stored 7 days).</p>
+    <h1>🚨 MWES Alerts &amp; Reports</h1>
+    <p><b>The Official MCrashCraft Weather Emergency Service (MWES).</b>
+       Live AMBER and Blue Alerts from the official NWS feeds, plus MWES reports/records:
+       Endangered Missing Child, Endangered Missing Adult, Ohio Blue Alert and BOLO entries.
+       Active reports stay up until cancelled or resolved. Hobby service — and note this
+       page is on a public URL, so only add information you are comfortable sharing.</p>
   </header>
 
   <div class="locbar">
@@ -36,13 +38,42 @@
 
   <div id="alerts" class="grid" style="margin-bottom:22px"></div>
 
-  <h2 style="font-size:16px; margin:8px 0 10px">🚔 BOLO vehicle board</h2>
+  <h2 style="font-size:16px; margin:8px 0 10px">📋 MWES Reports &amp; Records</h2>
+  <div class="card" style="margin-bottom:12px">
+    <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:8px">
+      <select id="rp-type" style="background:#26262c; color:#efeff1; border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:9px">
+        <option value="missing-child">Endangered Missing Child Alert</option>
+        <option value="missing-adult">Endangered Missing Adult Alert</option>
+        <option value="amber">AMBER Alert (manual)</option>
+        <option value="blue">Ohio Blue Alert (manual)</option>
+        <option value="bolo">BOLO — Be On the Lookout</option>
+      </select>
+      <input id="rp-person" type="text" placeholder="Person name" maxlength="90" class="rp" />
+      <input id="rp-child" type="text" placeholder="Child name (if applicable)" maxlength="90" class="rp" />
+      <input id="rp-desc" type="text" placeholder="Description (age, height, hair, clothing)" maxlength="400" class="rp" />
+      <input id="rp-vehicle" type="text" placeholder="Vehicle (make, model, color)" maxlength="90" class="rp" />
+      <input id="rp-plate" type="text" placeholder="Plate" maxlength="12" class="rp" />
+      <input id="rp-city" type="text" placeholder="City" maxlength="60" class="rp" />
+      <input id="rp-state" type="text" placeholder="State (e.g. OH)" maxlength="20" class="rp" />
+      <input id="rp-country" type="text" placeholder="Country" value="United States" maxlength="40" class="rp" />
+      <input id="rp-continent" type="text" placeholder="Continent" value="North America" maxlength="20" class="rp" />
+    </div>
+    <div style="display:flex; gap:10px; align-items:center; margin-top:10px">
+      <button id="rp-add" class="primary">Add report</button>
+      <span id="rp-status" class="count"></span>
+    </div>
+  </div>
+  <style>.rp { background:#26262c; color:#efeff1; border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:9px 12px }
+    .rec { display:grid; grid-template-columns: 110px 1fr; gap:2px 10px; font-size:12px }
+    .rec dt { color:#85858f } .rec dd { color:#efeff1 }</style>
+  <div id="reports" class="grid" style="margin-bottom:22px"></div>
+
+  <h2 style="font-size:16px; margin:8px 0 10px">🚔 BOLO vehicle board (legacy)</h2>
   <div class="card" style="margin-bottom:12px">
     <div style="display:flex; gap:8px; flex-wrap:wrap">
-      <input id="bolo-vehicle" type="text" placeholder="Vehicle (e.g. red Ford F-150)" maxlength="90"
-             style="flex:1; min-width:200px; padding:9px 12px; background:#26262c; color:#efeff1; border:1px solid rgba(255,255,255,0.12); border-radius:8px" />
-      <input id="bolo-plate" type="text" placeholder="Plate" maxlength="12"
-             style="width:120px; padding:9px 12px; background:#26262c; color:#efeff1; border:1px solid rgba(255,255,255,0.12); border-radius:8px" />
+      <input id="bolo-vehicle" type="text" placeholder="Vehicle (e.g. red Ford F-150)" maxlength="90" class="rp"
+             style="flex:1; min-width:200px" />
+      <input id="bolo-plate" type="text" placeholder="Plate" maxlength="12" class="rp" style="width:120px" />
       <button id="bolo-add" class="primary">Add BOLO</button>
     </div>
   </div>
@@ -112,6 +143,121 @@ function refreshBolo() {
   });
 }
 
+// ---- MWES reports/records: fixed labeled grid, EAS voice on new, cancel flow ----
+var TYPE_LABELS = { amber: "AMBER Alert", "missing-child": "Endangered Missing Child Alert",
+                    "missing-adult": "Endangered Missing Adult Alert", blue: "Ohio Blue Alert",
+                    bolo: "BOLO — Be On the Lookout" };
+var TYPE_COLORS = { amber: "#ff2d95", "missing-child": "#ff6d00", "missing-adult": "#ffd24d",
+                    blue: "#2ea8ff", bolo: "#9aa7c7" };
+var seenReports = null;
+
+function field(k, v) { return "<dt>" + k + "</dt><dd>" + (v ? WX.esc(v) : "—") + "</dd>"; }
+
+function fmtBoth(ts) {
+  var d = new Date(ts * 1000);
+  var h12 = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  var h24 = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString() + " " + h12 + " (" + h24 + ")";
+}
+
+function refreshReports() {
+  fetch("api/reports").then(function (r) { return r.json(); }).then(function (d) {
+    var box = document.getElementById("reports");
+    var reports = d.reports || [];
+    // voice: announce NEW active reports with the EAS tone; cancellations plainly
+    var ids = new Set(), fresh = [], cancels = [];
+    reports.forEach(function (r) {
+      var k = r.id + "|" + r.status;
+      ids.add(k);
+      if (seenReports && !seenReports.has(k)) {
+        if (r.status === "active") fresh.push(r);
+        else if (seenReports.has(r.id + "|active")) cancels.push(r);
+      }
+    });
+    var first = !seenReports;
+    seenReports = ids;
+    if (!first && document.getElementById("voice").checked) {
+      fresh.slice(0, 2).forEach(function (r) {
+        WX.easTone(6).then(function () {
+          WX.speak("This is the Official MCrashCraft Weather Emergency Service. New " +
+                   (TYPE_LABELS[r.type] || "report") + ". " +
+                   [r.person_name && "Person: " + r.person_name, r.child_name && "Child: " + r.child_name,
+                    r.description, r.vehicle && "Vehicle: " + r.vehicle,
+                    [r.city, r.state].filter(Boolean).join(", ")].filter(Boolean).join(". ") +
+                   ". End of message.");
+        });
+      });
+      cancels.slice(0, 2).forEach(function (r) {
+        WX.speak("This is the Official MCrashCraft Weather Emergency Service. " +
+                 (TYPE_LABELS[r.type] || "Report") + " for " +
+                 (r.person_name || r.child_name || "the reported person") + " has been " + r.status +
+                 ". End of message.");
+      });
+    }
+    if (!reports.length) {
+      box.innerHTML = '<div class="card"><h3>No reports on record</h3><div class="meta">Feed alerts (AMBER, Blue) appear here automatically; add manual reports above.</div></div>';
+      return;
+    }
+    box.innerHTML = reports.map(function (r) {
+      var col = TYPE_COLORS[r.type] || "#9aa7c7";
+      return '<div class="card accent" style="--ac:' + col + '"><h3>' +
+        WX.esc(TYPE_LABELS[r.type] || r.type) +
+        ' <span class="badge" style="background:' + (r.status === "active" ? "#4caf50" : "#9e9e9e") + '">' +
+        WX.esc(r.status) + "</span> <span class='count'>record #" + r.id + " · " + WX.esc(r.source) + "</span></h3>" +
+        '<dl class="rec">' +
+        field("Person", r.person_name) + field("Child", r.child_name) +
+        field("Description", r.description) + field("Vehicle", r.vehicle) + field("Plate", r.plate) +
+        field("City", r.city) + field("State", r.state) +
+        field("Country", r.country) + field("Continent", r.continent) +
+        field("Pinpoint", r.lat != null ? r.lat + ", " + r.lon : null) +
+        field("Created", r.created ? fmtBoth(r.created) : null) +
+        field("Updated", r.updated ? fmtBoth(r.updated) : null) +
+        "</dl>" +
+        (r.source === "manual" && r.status === "active"
+          ? '<div style="margin-top:8px"><button class="small rp-cancel" data-id="' + r.id + '">Cancel report</button>' +
+            ' <button class="small rp-resolve" data-id="' + r.id + '">Mark resolved</button></div>' : "") +
+        "</div>";
+    }).join("");
+    box.querySelectorAll(".rp-cancel, .rp-resolve").forEach(function (b) {
+      b.addEventListener("click", function () {
+        fetch("api/reports", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: +b.getAttribute("data-id"),
+                                 status: b.classList.contains("rp-cancel") ? "cancelled" : "resolved" }) })
+          .then(refreshReports);
+      });
+    });
+  }).catch(function () {
+    document.getElementById("reports").innerHTML =
+      '<div class="card"><h3>Reports unavailable</h3><div class="meta">Needs the server.py API.</div></div>';
+  });
+}
+
+document.getElementById("rp-add").addEventListener("click", function () {
+  var val = function (id) { return document.getElementById(id).value.trim(); };
+  var body = { type: val("rp-type") || document.getElementById("rp-type").value,
+               person_name: val("rp-person"), child_name: val("rp-child"),
+               description: val("rp-desc"), vehicle: val("rp-vehicle"), plate: val("rp-plate"),
+               city: val("rp-city"), state: val("rp-state"),
+               country: val("rp-country"), continent: val("rp-continent") };
+  if (!(body.person_name || body.child_name || body.description)) {
+    document.getElementById("rp-status").textContent = "Add a person, child, or description first.";
+    return;
+  }
+  fetch("api/reports", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      document.getElementById("rp-status").textContent =
+        d.ok ? "Report #" + d.id + " added" + (d.lat ? " and pinpointed." : ".") : "Error: " + d.error;
+      ["rp-person", "rp-child", "rp-desc", "rp-vehicle", "rp-plate", "rp-city", "rp-state"]
+        .forEach(function (id) { document.getElementById(id).value = ""; });
+      refreshReports();
+    });
+});
+
+refreshReports();
+setInterval(refreshReports, 60 * 1000); // 1-minute refresh
+
 document.getElementById("bolo-add").addEventListener("click", function () {
   var vehicle = document.getElementById("bolo-vehicle").value.trim();
   var plate = document.getElementById("bolo-plate").value.trim();
@@ -128,7 +274,7 @@ document.getElementById("bolo-add").addEventListener("click", function () {
 WX.initLocBar(function () { seenAmber = null; refreshAmber(); });
 refreshAmber();
 refreshBolo();
-setInterval(refreshAmber, 2 * 60 * 1000);
+setInterval(refreshAmber, 60 * 1000); // 1-minute refresh
 setInterval(refreshBolo, 5 * 60 * 1000);
 </script>
 </body>

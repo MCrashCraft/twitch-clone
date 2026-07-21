@@ -67,7 +67,25 @@ def db():
     conn.execute("""CREATE TABLE IF NOT EXISTS bolo (
         id INTEGER PRIMARY KEY AUTOINCREMENT, created INTEGER, source TEXT,
         vehicle TEXT, plate TEXT, details TEXT)""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT, person_name TEXT, child_name TEXT, description TEXT,
+        vehicle TEXT, plate TEXT, city TEXT, state TEXT,
+        country TEXT DEFAULT 'United States', continent TEXT DEFAULT 'North America',
+        lat REAL, lon REAL, status TEXT DEFAULT 'active',
+        source TEXT DEFAULT 'manual', feed_id TEXT UNIQUE,
+        created INTEGER, updated INTEGER)""")
     return conn
+
+
+REPORT_TYPES = {"amber", "missing-child", "missing-adult", "blue", "bolo"}
+
+
+def report_row_dict(r):
+    keys = ["id", "type", "person_name", "child_name", "description", "vehicle", "plate",
+            "city", "state", "country", "continent", "lat", "lon", "status", "source",
+            "feed_id", "created", "updated"]
+    return dict(zip(keys, r))
 
 
 def fetch_json(url):
@@ -191,9 +209,39 @@ def ingest_once():
                            g[1], g[0])
             except Exception:
                 pass
+            try:  # AMBER + Blue Alerts auto-ingest into the reports table
+                import platform_api as _pa
+                sa = _pa.ep_safety_alerts({})
+                now = int(time.time())
+                for a in sa.get("data", []):
+                    fid = "nws|" + str(a.get("id"))
+                    row = conn.execute("SELECT id FROM reports WHERE feed_id=?", (fid,)).fetchone()
+                    if row:
+                        conn.execute("UPDATE reports SET status='active', updated=? WHERE feed_id=?",
+                                     (now, fid))
+                    else:
+                        conn.execute(
+                            """INSERT INTO reports (type, person_name, child_name, description,
+                               vehicle, plate, city, state, status, source, feed_id, created, updated)
+                               VALUES (?,?,?,?,?,?,?,?, 'active', 'feed', ?, ?, ?)""",
+                            (a.get("type"), a.get("person_name"), a.get("child_name"),
+                             (a.get("headline") or a.get("description") or "")[:400],
+                             a.get("vehicle"), a.get("plate"), a.get("city"), a.get("state"),
+                             fid, now, now))
+                # Feed reports whose alert expired upstream become 'expired'
+                active_fids = {"nws|" + str(a.get("id")) for a in sa.get("data", [])}
+                for (fid,) in conn.execute(
+                        "SELECT feed_id FROM reports WHERE source='feed' AND status='active'").fetchall():
+                    if fid not in active_fids:
+                        conn.execute("UPDATE reports SET status='expired', updated=? WHERE feed_id=?",
+                                     (int(time.time()), fid))
+            except Exception:
+                pass
             cutoff = int(time.time()) - RETENTION_S
             conn.execute("DELETE FROM alert_history WHERE last_seen < ?", (cutoff,))
             conn.execute("DELETE FROM bolo WHERE created < ?", (cutoff,))
+            # Active reports stay until cancelled/resolved; only inactive ones age out
+            conn.execute("DELETE FROM reports WHERE status != 'active' AND updated < ?", (cutoff,))
             conn.commit()
         finally:
             conn.close()
@@ -232,6 +280,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.rstrip("/") == "/api/reports":
+            return self.post_report()
         if parsed.path.rstrip("/") != "/api/bolo":
             return self.send_json({"ok": False, "error": "unknown endpoint"}, 404)
         try:
@@ -254,6 +304,60 @@ class Handler(SimpleHTTPRequestHandler):
                 finally:
                     conn.close()
             return self.send_json({"ok": True})
+        except Exception as exc:
+            return self.send_json({"ok": False, "error": str(exc)[:200]}, 400)
+
+    def post_report(self):
+        """Create a report/record, or update one's status (id + status)."""
+        try:
+            length = min(int(self.headers.get("Content-Length", 0)), 8192)
+            p = json.loads(self.rfile.read(length).decode("utf-8", "replace") or "{}")
+            now = int(time.time())
+            with _db_lock:
+                conn = db()
+                try:
+                    if p.get("id") and p.get("status"):  # status change (cancel/resolve)
+                        if p["status"] not in ("active", "cancelled", "resolved"):
+                            return self.send_json({"ok": False, "error": "bad status"}, 400)
+                        conn.execute("UPDATE reports SET status=?, updated=? WHERE id=?",
+                                     (p["status"], now, int(p["id"])))
+                        conn.commit()
+                        return self.send_json({"ok": True, "id": int(p["id"]), "status": p["status"]})
+                    rtype = str(p.get("type", "bolo"))
+                    if rtype not in REPORT_TYPES:
+                        return self.send_json({"ok": False, "error": "type must be one of: " +
+                                               ", ".join(sorted(REPORT_TYPES))}, 400)
+                    if not (p.get("person_name") or p.get("child_name") or p.get("description")):
+                        return self.send_json({"ok": False, "error": "person_name, child_name or description required"}, 400)
+                    if conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0] >= 1000:
+                        return self.send_json({"ok": False, "error": "reports table full"}, 429)
+                    lat = lon = None
+                    try:  # pinpoint: geocode city/state when given
+                        import platform_api as _pa
+                        if p.get("city"):
+                            locq = {"city": [str(p["city"])[:60]]}
+                            if p.get("state"):
+                                locq["state"] = [str(p["state"])[:20]]
+                            loc = _pa.resolve_location(locq)
+                            lat, lon = loc["lat"], loc["lon"]
+                    except Exception:
+                        pass
+                    cur = conn.execute(
+                        """INSERT INTO reports (type, person_name, child_name, description, vehicle,
+                           plate, city, state, country, continent, lat, lon, status, source, created, updated)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'active', 'manual', ?, ?)""",
+                        (rtype, str(p.get("person_name", ""))[:90] or None,
+                         str(p.get("child_name", ""))[:90] or None,
+                         str(p.get("description", ""))[:400] or None,
+                         str(p.get("vehicle", ""))[:90] or None, str(p.get("plate", ""))[:12] or None,
+                         str(p.get("city", ""))[:60] or None, str(p.get("state", ""))[:20] or None,
+                         str(p.get("country", "United States"))[:40],
+                         str(p.get("continent", "North America"))[:20],
+                         lat, lon, now, now))
+                    conn.commit()
+                    return self.send_json({"ok": True, "id": cur.lastrowid, "lat": lat, "lon": lon})
+                finally:
+                    conn.close()
         except Exception as exc:
             return self.send_json({"ok": False, "error": str(exc)[:200]}, 400)
 
@@ -298,6 +402,23 @@ class Handler(SimpleHTTPRequestHandler):
                     {"id": r[0], "kind": r[1], "event": r[2], "area": r[3],
                      "details": json.loads(r[4] or "{}"), "lat": r[5], "lon": r[6],
                      "first_seen": r[7], "last_seen": r[8]} for r in rows]})
+            if name == "reports":
+                status = (q.get("status", [""])[0] or "").strip()
+                with _db_lock:
+                    conn = db()
+                    try:
+                        sql = "SELECT * FROM reports"
+                        args = []
+                        if status:
+                            sql += " WHERE status=?"
+                            args.append(status)
+                        rows = conn.execute(sql + " ORDER BY updated DESC LIMIT 200", args).fetchall()
+                    finally:
+                        conn.close()
+                return self.send_json({"count": len(rows),
+                                       "note": "MWES reports/records: feed-ingested AMBER/Blue alerts + "
+                                               "manual entries; active reports stay until cancelled",
+                                       "reports": [report_row_dict(r) for r in rows]})
             if name == "bolo":
                 with _db_lock:
                     conn = db()

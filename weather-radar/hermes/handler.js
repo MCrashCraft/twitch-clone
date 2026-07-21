@@ -7,7 +7,7 @@ const BASE_URL = (process.env.WEATHER_API_BASE || "https://weather-radar.tail977
 
 const ALLOWED = ["/api/nws-alerts", "/api/amber-alerts", "/api/noaa-radio",
   "/api/911-public-calls", "/api/cad", "/api/power-outages", "/api/gas-incidents",
-  "/api/hrrr-summary", "/api/storm-reports", "/api/tropical", "/api/rivers"];
+  "/api/hrrr-summary", "/api/storm-reports", "/api/tropical", "/api/rivers", "/api/early-warnings", "/api/safety-alerts"];
 
 async function getAlerts(endpoint) {
   endpoint = String(endpoint || "").trim();

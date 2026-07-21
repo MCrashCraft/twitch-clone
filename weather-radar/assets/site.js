@@ -84,10 +84,59 @@ var WX = (function () {
     });
   }
 
+  // EAS attention signal: 853 Hz + 960 Hz dual sine, the real two-tone signal.
+  function easTone(seconds) {
+    return new Promise(function (resolve) {
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        var ctx = new AC();
+        var gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.16, ctx.currentTime);
+        gain.connect(ctx.destination);
+        var dur = seconds || 8;
+        [853, 960].forEach(function (f) {
+          var o = ctx.createOscillator();
+          o.frequency.value = f; o.type = "sine";
+          o.connect(gain); o.start(); o.stop(ctx.currentTime + dur);
+        });
+        setTimeout(function () { try { ctx.close(); } catch (e) {} resolve(); }, dur * 1000 + 300);
+      } catch (e) { resolve(); }
+    });
+  }
+
+  // Natural voice selection: rank available voices, remember the user's pick.
+  function rankVoice(v) {
+    var n = (v.name || "").toLowerCase();
+    var score = 0;
+    if (/natural|neural|online/.test(n)) score += 40;
+    if (/google/.test(n)) score += 25;
+    if (/samantha|aria|jenny|guy|zira|susan|karen/.test(n)) score += 15;
+    if ((v.lang || "").toLowerCase().indexOf("en-us") === 0) score += 10;
+    else if ((v.lang || "").toLowerCase().indexOf("en") === 0) score += 5;
+    if (v.localService === false) score += 8; // cloud voices usually sound better
+    return score;
+  }
+
+  function pickVoice() {
+    if (!("speechSynthesis" in window)) return null;
+    var voices = window.speechSynthesis.getVoices() || [];
+    if (!voices.length) return null;
+    var savedName = localStorage.getItem("wx-voice");
+    if (savedName) {
+      var saved = voices.filter(function (v) { return v.name === savedName; })[0];
+      if (saved) return saved;
+    }
+    return voices.slice().sort(function (a, b) { return rankVoice(b) - rankVoice(a); })[0];
+  }
+
+  function setVoice(name) { localStorage.setItem("wx-voice", name || ""); }
+
   function speak(text) {
     if (!("speechSynthesis" in window) || !text) return;
     var u = new SpeechSynthesisUtterance(text);
-    u.rate = 0.95; u.pitch = 0.9;
+    var v = pickVoice();
+    if (v) { u.voice = v; u.lang = v.lang; }
+    u.rate = 1.0; u.pitch = 1.0; // natural voices sound best unmodified
     window.speechSynthesis.speak(u);
   }
 
@@ -117,5 +166,6 @@ var WX = (function () {
 
   return { parseLocation: parseLocation, getLocation: getLocation, setLocation: setLocation,
            api: api, initLocBar: initLocBar, tone: tone, speak: speak, announce: announce,
-           cancelSpeech: cancelSpeech, esc: esc, needsLocation: needsLocation };
+           cancelSpeech: cancelSpeech, easTone: easTone, pickVoice: pickVoice, setVoice: setVoice,
+           esc: esc, needsLocation: needsLocation };
 })();

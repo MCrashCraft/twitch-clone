@@ -269,36 +269,60 @@ _WMO_TEXT = {
 
 _COMPASS = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"]
 
+MWES_INTRO = "This is the Official MCrashCraft Weather Emergency Service."
+
+# Universal dual formats: US first, metric/24-hour in parentheses — used in
+# every spoken segment and API text so the output works for everyone.
+
+
+def _fmt_time_iso(iso, offset_s=0):
+    """ISO time -> '8:00 PM (20:00)'. Naive strings are treated as UTC and
+    shifted by offset_s (the location's UTC offset) when provided."""
+    try:
+        d = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d + __import__("datetime").timedelta(seconds=offset_s)
+    except Exception:
+        return str(iso)
+    return "%s (%s)" % (d.strftime("%I:%M %p").lstrip("0"), d.strftime("%H:%M"))
+
+
+def _fmt_speed_kmh(kmh):
+    return "%d miles per hour (%d kilometers per hour)" % (round(kmh * 0.621371), round(kmh))
+
+
+def _fmt_temp_c(c):
+    return "%d degrees Fahrenheit (%d Celsius)" % (round(c * 9 / 5 + 32), round(c))
+
+
+def _radio_current(loc):
+    """Cached Open-Meteo current-conditions payload (metric base, tz offset included)."""
+    return _cached("radiocond:%s,%s" % (loc["lat"], loc["lon"]), 600, lambda: _fetch_json(
+        "https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
+        "&current=temperature_2m,apparent_temperature,relative_humidity_2m,"
+        "wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code&timezone=auto"
+        % (loc["lat"], loc["lon"])))
+
 
 def _radio_conditions_text(loc):
-    """Current-conditions segment (global, Open-Meteo). US listeners get
-    Fahrenheit/mph to match the NWS forecast segment; everyone else metric."""
-    us = bool(loc.get("state"))
+    """Current-conditions segment — dual units for every listener."""
     try:
-        url = ("https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
-               "&current=temperature_2m,apparent_temperature,relative_humidity_2m,"
-               "wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code&timezone=UTC"
-               % (loc["lat"], loc["lon"]))
-        if us:
-            url += "&temperature_unit=fahrenheit&wind_speed_unit=mph"
-        d = _cached("radiocond:%s,%s,%s" % (loc["lat"], loc["lon"], us), 600, lambda: _fetch_json(url))
-        c = d.get("current", {})
+        c = _radio_current(loc).get("current", {})
         t = c.get("temperature_2m")
         if t is None:
             return None
         feels = c.get("apparent_temperature")
         feels = t if feels is None else feels  # explicit: 0 degrees is a real value
         parts = ["Current conditions: %s." % _WMO_TEXT.get(c.get("weather_code"), "variable skies"),
-                 "Temperature %d degrees %s, feels like %d." %
-                 (round(t), "Fahrenheit" if us else "Celsius", round(feels))]
+                 "Temperature %s, feels like %s." % (_fmt_temp_c(t), _fmt_temp_c(feels))]
         ws, wg, wd = c.get("wind_speed_10m"), c.get("wind_gusts_10m"), c.get("wind_direction_10m")
         if ws is not None:
             sent = "Winds"
             if wd is not None:
                 sent += " from the %s" % _COMPASS[int((wd + 22.5) // 45) % 8]
-            sent += " at %d %s" % (round(ws), "miles per hour" if us else "kilometers per hour")
+            sent += " at %s" % _fmt_speed_kmh(ws)
             if wg is not None:
-                sent += ", gusting to %d" % round(wg)
+                sent += ", gusting to %s" % _fmt_speed_kmh(wg)
             parts.append(sent + ".")
         rh = c.get("relative_humidity_2m")
         if rh is not None:
@@ -333,14 +357,11 @@ def _radio_outlook_text(q, loc):
         if s["storm_risk"] in (None, "none"):
             return ("The short term outlook: no significant storm activity is expected "
                     "over the next %s hours." % s.get("horizon_hours", 18))
-        gust_kmh = s.get("max_gust_kmh") or 0
-        gust_txt = ("%d miles per hour" % round(gust_kmh * 0.621371)
-                    if loc.get("state") else "%d kilometers per hour" % round(gust_kmh))
         return ("The short term outlook: storm risk is %s. Peak storm energy near %s joules "
                 "per kilogram, with wind gusts to %s and up to a %s percent "
                 "chance of precipitation." %
                 (s["storm_risk"], round(s.get("max_cape_jkg") or 0),
-                 gust_txt, s.get("max_precip_prob_pct") or 0))
+                 _fmt_speed_kmh(s.get("max_gust_kmh") or 0), s.get("max_precip_prob_pct") or 0))
     except Exception:
         return None
 
@@ -365,43 +386,66 @@ def ep_noaa_radio(q):
     alerts.sort(key=_alert_rank)  # warnings first, so they are always spoken
     has_warning = any("warning" in (a.get("event") or "").lower() for a in alerts)
 
+    try:
+        offset_s = _radio_current(loc).get("utc_offset_seconds") or 0
+    except Exception:
+        offset_s = 0
+    now_txt = _fmt_time_iso(datetime.now(timezone.utc).isoformat(), offset_s)
     segments = [{"name": "station", "text":
-                 "This is the Weather Emergency Platform automated weather radio service for %s. "
-                 "Broadcasting continuously. Data refreshes every cycle." % loc["label"]}]
+                 "%s M W E S, broadcasting continuously for %s. "
+                 "The time is %s. Data refreshes every cycle." %
+                 (MWES_INTRO, loc["label"], now_txt)}]
 
     cond = _radio_conditions_text(loc)
     if cond:
         segments.append({"name": "conditions", "text": cond})
 
+    # Hazards: one segment per alert (never mixed), each in the fixed MWES
+    # template: intro -> type -> location -> time -> details -> End of message.
     if not alerts_ok:
-        alert_text = ("Official alert information is not available for this location. "
-                      "Alert coverage on this broadcast is provided by the U.S. National "
-                      "Weather Service; the broadcast will keep retrying each cycle.")
+        segments.append({"name": "alerts", "tone": False, "text":
+                         "%s Official alert information is not available for this location. "
+                         "Alert coverage is provided by the U.S. National Weather Service. "
+                         "The broadcast will keep retrying each cycle. End of message." % MWES_INTRO})
     elif not alerts:
-        alert_text = ("There are no active watches, warnings or advisories for this location "
-                      "at this time.")
+        segments.append({"name": "alerts", "tone": False, "text":
+                         "%s There are no active watches, warnings or advisories for %s "
+                         "at this time. End of message." % (MWES_INTRO, loc["label"])})
     else:
-        # Point-filtered query: every alert here covers the listener's location,
-        # so say so — naming areaDesc's first zone (often far away) misleads.
-        lines = ["Now the hazardous weather summary for %s. There %s %d active alert%s." %
-                 (loc["label"], "is" if len(alerts) == 1 else "are",
-                  len(alerts), "" if len(alerts) == 1 else "s")]
+        segments.append({"name": "alerts", "tone": False, "text":
+                         "Hazard summary for %s: %d active alert%s. Each alert follows." %
+                         (loc["label"], len(alerts), "" if len(alerts) == 1 else "s")})
         for a in alerts[:6]:
-            seg = "%s, in effect for this area." % a["event"]
-            if a["expires"]:
-                seg += " Until %s." % a["expires"][:16].replace("T", " at ")
-            if a["instruction"]:
-                seg += " " + a["instruction"].split(".")[0] + "."
-            lines.append(seg)
+            ev = (a.get("event") or "Alert").strip()
+            lines = [MWES_INTRO, "%s." % ev, "Location: %s." % loc["label"]]
+            if a.get("expires"):
+                lines.append("In effect until %s." % _fmt_time_iso(a["expires"]))
+            detail = (a.get("instruction") or a.get("description") or "").split(".")[0].strip()
+            if detail:
+                lines.append(detail + ".")
+            lines.append("End of message.")
+            segments.append({"name": "alert", "alert_id": a.get("id"),
+                             "tone": "warning" in ev.lower(), "text": " ".join(lines)})
         if len(alerts) > 6:
-            lines.append("Plus %d additional alert%s also in effect for this area." %
-                         (len(alerts) - 6, "" if len(alerts) - 6 == 1 else "s"))
-        alert_text = " ".join(lines)
-    segments.append({"name": "alerts", "text": alert_text, "tone": has_warning})
+            segments.append({"name": "alerts", "tone": False, "text":
+                             "Plus %d additional alert%s also in effect for this area. "
+                             "End of message." % (len(alerts) - 6, "" if len(alerts) - 6 == 1 else "s")})
 
     fc = _nws_forecast_text(loc)
     if fc:
         segments.append({"name": "forecast", "text": fc})
+
+    # MWES early warnings: forecast events, always labeled as forecasts.
+    try:
+        for w in _early_warnings(loc, offset_s)[:3]:
+            segments.append({"name": "early-warning", "tone": False, "text":
+                             "%s Forecast event. This is a forecast, not a current event. "
+                             "%s expected around %s, in about %s. Confidence: %s. End of message." %
+                             (MWES_INTRO, w["event"], w["expected_at_text"],
+                              w["lead_text"], w["confidence"])})
+    except Exception:
+        pass
+
     outlook = _radio_outlook_text(q, loc)
     if outlook:
         segments.append({"name": "outlook", "text": outlook})
@@ -762,6 +806,104 @@ def ep_hrrr_summary(q):
 
 
 # ----------------------------------------------------------------------------
+# MWES early warnings: forecast events from model data, labeled as forecasts
+# ----------------------------------------------------------------------------
+
+def _lead_text(minutes):
+    if minutes < 90:
+        return "%d minutes" % minutes
+    return "%d hours" % round(minutes / 60)
+
+
+def _early_warnings(loc, offset_s=0):
+    q = {"lat": [str(loc["lat"])], "lon": [str(loc["lon"])]}
+    hourly = ep_hrrr_summary(q)["data"][0].get("hourly", [])
+    now = datetime.now(timezone.utc)
+    out = []
+
+    def first(cond, event, conf):
+        for h in hourly:
+            try:
+                when = datetime.fromisoformat(h["time"]).replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+            lead = (when - now).total_seconds() / 60
+            if lead < 5 or not cond(h):
+                continue
+            out.append({"event": event, "kind": "forecast",
+                        "expected_at": h["time"],
+                        "expected_at_text": _fmt_time_iso(h["time"], offset_s),
+                        "lead_minutes": round(lead), "lead_text": _lead_text(round(lead)),
+                        "confidence": conf(h)})
+            return
+
+    first(lambda h: (h.get("cape") or 0) >= 1500 and (h.get("precip_prob") or 0) >= 50,
+          "Thunderstorms are",
+          lambda h: "high" if (h.get("cape") or 0) >= 2500 else "moderate")
+    first(lambda h: (h.get("precip_mm") or 0) >= 5,
+          "Heavy rain is", lambda h: "moderate")
+    first(lambda h: (h.get("gust_kmh") or 0) >= 60,
+          "Damaging wind gusts are", lambda h: "moderate")
+    out.sort(key=lambda w: w["lead_minutes"])
+    return out
+
+
+def ep_early_warnings(q):
+    loc = resolve_location(q, required=True)
+    try:
+        offset_s = _radio_current(loc).get("utc_offset_seconds") or 0
+    except Exception:
+        offset_s = 0
+    data = _early_warnings(loc, offset_s)
+    return _envelope("early-warnings", data, loc,
+                     note="MWES forecast events from HRRR/GFS model data — these are "
+                          "predictions with lead time, not current events")
+
+
+# ----------------------------------------------------------------------------
+# Safety alerts: AMBER + Blue Alert (real NWS feeds), person/vehicle extracted
+# ----------------------------------------------------------------------------
+
+_NAME_RE = re.compile(r"(?:abduct(?:ion|ed)(?: of)?|missing (?:child|person|adult)[:,]?|victim[:,]?|child(?: is)?[:,]?)\s+"
+                      r"([A-Z][a-z]+(?: [A-Z][a-z]+){1,2})")
+
+
+def ep_safety_alerts(q):
+    loc = resolve_location(q, required=False)
+    data = []
+    for event, typ in (("Child Abduction Emergency", "amber"), ("Blue Alert", "blue")):
+        try:
+            raw = _cached("safety:" + typ, 55, lambda e=event: _fetch_json(
+                "https://api.weather.gov/alerts/active?event=" + urllib.parse.quote(e)))
+        except Exception:
+            continue
+        for f in raw.get("features", []):
+            a = _norm_nws(f)
+            text = (a.get("description") or "") + " " + (a.get("instruction") or "")
+            a["type"] = typ
+            a["person_name"] = ((_NAME_RE.search(text) or [None, None])[1] or "").strip() or None
+            a["child_name"] = a["person_name"] if typ == "amber" else None
+            a["vehicle"] = ((_VEHICLE_RE.search(text) or [None, None])[1] or "").strip() or None
+            a["plate"] = ((_PLATE_RE.search(text) or [None, None])[1] or "").strip() or None
+            first_area = (a.get("areas") or "").split(";")[0].strip()
+            a["city"] = first_area or None
+            a["state"] = None
+            m = re.search(r",\s*([A-Z]{2})\b", a.get("areas") or "")
+            if m:
+                a["state"] = m.group(1)
+            a["country"] = "United States"
+            a["continent"] = "North America"
+            data.append(a)
+    if loc and loc.get("state"):
+        name = STATES[loc["state"]].lower()
+        data = [a for a in data
+                if name in (a.get("areas") or "").lower() or (" " + loc["state"]) in (a.get("areas") or "")]
+    return _envelope("safety-alerts", data, loc,
+                     note="AMBER (Child Abduction Emergency) and Blue Alerts from the official "
+                          "NWS dissemination feeds, with person/vehicle details extracted")
+
+
+# ----------------------------------------------------------------------------
 # Tropical cyclones (real: NHC via NOAA ArcGIS — outlook areas + active storms)
 # ----------------------------------------------------------------------------
 
@@ -866,6 +1008,8 @@ ROUTES = {
     "storm-reports": ep_storm_reports,
     "tropical": ep_tropical,
     "rivers": ep_rivers,
+    "early-warnings": ep_early_warnings,
+    "safety-alerts": ep_safety_alerts,
 }
 
 

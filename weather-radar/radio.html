@@ -5,20 +5,24 @@
 <title>NOAA Radio — Weather Emergency Platform</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128251;</text></svg>" />
 <link rel="stylesheet" href="assets/site.css" />
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
 </head>
 <body>
 <nav class="topnav">
   <span class="brand"><span class="dot"></span>Weather Emergency</span>
   <a href="/">🗺 Map</a><a class="active" href="radio.html">📻 NOAA Radio</a>
   <a href="911.html">🚒 911 Dispatch</a><a href="powerlines.html">⚡ Downed Lines</a>
-  <a href="amber.html">🚨 AMBER / BOLO</a><a href="api/status">API</a>
+  <a href="amber.html">🚨 Alerts & Reports</a><a href="api/status">API</a>
 </nav>
 <div class="wrap">
   <header class="page">
-    <h1>📻 NOAA-style Weather Radio</h1>
-    <p>A synthesized weather-radio broadcast for your location, generated from the real
-       active National Weather Service alerts — attention tone, spoken bulletin, and the
-       full alert list. Not an actual NOAA transmission.</p>
+    <h1>📻 MWES Weather Radio — 24/7</h1>
+    <p><b>The Official MCrashCraft Weather Emergency Service (MWES).</b>
+       A continuous NOAA-style broadcast for your location built from real data:
+       station ID, current conditions, one alert at a time, the official NWS forecast,
+       MWES early warnings (always labeled as forecasts), and outlook — with an EAS
+       attention signal when a new alert arrives. Hobby service; not a government
+       agency and not an actual NOAA or EAS transmission.</p>
   </header>
 
   <div class="locbar">
@@ -40,6 +44,13 @@
       alerts (with warning tone), the official NWS forecast, outlook — refreshing data every cycle.
       Keep this tab open; a screen wake-lock is requested while on air.</div>
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; border-top:1px solid rgba(255,255,255,0.08); padding-top:10px">
+      <label class="swrow">Voice
+        <select id="voice-sel" style="max-width:220px; background:#26262c; color:#efeff1; border:1px solid rgba(255,255,255,0.12); border-radius:6px; padding:6px"></select></label>
+      <button id="voice-test" class="small">Test voice</button>
+      <span class="count">voice quality depends on your browser — Chrome, Edge and phones have the most natural voices</span>
+    </div>
+    <div id="miniradar" style="height:230px; border-radius:10px; margin-top:12px; background:#101013"></div>
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; border-top:1px solid rgba(255,255,255,0.08); padding-top:10px">
       <button id="play">▶ Play once</button>
       <button id="stop">■ Stop</button>
       <label class="swrow">Auto-play new alerts
@@ -54,6 +65,7 @@
   <div id="alerts" class="grid"></div>
 </div>
 
+<script src="vendor/leaflet/leaflet.js"></script>
 <script src="assets/site.js"></script>
 <script>
 "use strict";
@@ -74,9 +86,15 @@ function refresh(auto) {
       new Date(radio.generated).toLocaleTimeString();
     // Auto-play only when the broadcast actually changed
     if (auto && document.getElementById("auto").checked && item.id && item.id !== lastScriptId && !live.on) {
-      WX.announce(item.script); // suppressed while the 24/7 loop owns the speech channel
+      // tone only when a warning is active; suppressed while the 24/7 loop runs
+      (item.has_warning ? WX.announce : WX.speak)(item.script);
     }
     lastScriptId = item.id;
+    live.lastItem = item;
+    if (radio.location && radio.location.lat) {
+      live.loc = radio.location;
+      initMiniRadar(radio.location.lat, radio.location.lon);
+    }
 
     var box = document.getElementById("alerts");
     if (!(alerts.data || []).length) {
@@ -103,12 +121,19 @@ function refresh(auto) {
 // duration-based fallback timer so the loop can never stall, even if the
 // speech engine drops an onend event (or has no voices at all).
 
-var live = { on: false, cycle: 0, segIdx: 0, segs: [], wakeLock: null, resumeTimer: null };
+// live.gen is a generation token: bumped on every on-air start, EAS interrupt,
+// location change and resync. Every async callback checks it, so a superseded
+// chain can never keep narrating alongside a new one.
+var live = { on: false, gen: 0, cycle: 0, segIdx: 0, segs: [], wakeLock: null,
+             resumeTimer: null, retryTimer: null, watchTimer: null,
+             seenIds: null, spokeOk: false, lastItem: null, loc: null };
 
+var MWES = "This is the Official MCrashCraft Weather Emergency Service.";
 var SEGMENT_LABELS = { station: "Station ID", conditions: "Current conditions", alerts: "Hazards summary",
+                       alert: "Alert", "early-warning": "Early warning (forecast)",
                        forecast: "NWS forecast", outlook: "Storm outlook", signoff: "Sign-off" };
 
-function speakChunks(text, onDone) {
+function speakChunks(text, gen, onDone) {
   var sentences = String(text).match(/[^.!?]+[.!?]+\s*|[^.!?]+$/g) || [String(text)];
   var chunks = [];
   sentences.forEach(function (s) {
@@ -117,7 +142,7 @@ function speakChunks(text, onDone) {
   });
   var i = 0;
   (function next() {
-    if (!live.on) return;
+    if (!live.on || gen !== live.gen) return;
     if (i >= chunks.length) { setTimeout(onDone, 400); return; } // brief inter-segment gap
     var c = chunks[i++];
     var start = Date.now();
@@ -135,8 +160,11 @@ function speakChunks(text, onDone) {
     };
     if ("speechSynthesis" in window) {
       var u = new SpeechSynthesisUtterance(c);
-      u.rate = 0.95; u.pitch = 0.9;
-      u.onend = onSpoken; u.onerror = onSpoken;
+      var v = WX.pickVoice();
+      if (v) { u.voice = v; u.lang = v.lang; }
+      u.rate = 1.0; u.pitch = 1.0;
+      u.onend = function () { live.spokeOk = true; onSpoken(); }; // real speech confirmed
+      u.onerror = onSpoken;
       try { speechSynthesis.speak(u); } catch (e) { onSpoken(); }
     } else {
       onSpoken();
@@ -144,85 +172,256 @@ function speakChunks(text, onDone) {
   })();
 }
 
-function airSegment() {
-  if (!live.on) return;
-  if (live.segIdx >= live.segs.length) { live.cycle++; fetchCycle(); return; }
+function setMeta(text) { document.getElementById("live-meta").textContent = text; }
+
+function airSegment(gen) {
+  if (!live.on || gen !== live.gen) return;
+  if (live.segIdx >= live.segs.length) { live.cycle++; fetchCycle(gen); return; }
   var seg = live.segs[live.segIdx++];
   document.getElementById("now-playing").textContent =
     "now: " + (SEGMENT_LABELS[seg.name] || seg.name) + " (" + live.segIdx + "/" + live.segs.length + ")";
-  var go = function () { speakChunks(seg.text, airSegment); };
+  var go = function () { speakChunks(seg.text, gen, function () { airSegment(gen); }); };
   if (seg.tone) WX.tone().then(go); else go();
 }
 
-function fetchCycle() {
-  if (!live.on) return;
+function fetchCycle(gen) {
+  if (!live.on || gen !== live.gen) return;
   WX.api("/api/noaa-radio").then(function (d) {
-    var item = (d.data || [])[0] || {};
+    if (!live.on || gen !== live.gen) return;
+    if (d.status !== "ok" || !(d.data || []).length) { // API-level error: back off, stay quiet
+      setMeta("broadcast data error — retrying in 30 s (still on air)");
+      live.retryTimer = setTimeout(function () { fetchCycle(gen); }, 30000);
+      return;
+    }
+    var item = d.data[0];
+    live.lastItem = item;
     live.segs = item.segments && item.segments.length ? item.segments
-      : [{ name: "alerts", text: item.script || "No broadcast data available. Retrying next cycle." }];
+      : [{ name: "alerts", text: item.script || "No broadcast data available." }];
     live.segIdx = 0;
-    document.getElementById("live-meta").textContent =
-      "cycle " + (live.cycle + 1) + " · ~" + Math.round((item.est_read_seconds || 60) / 60) + " min per cycle · " +
-      (item.alerts_included || 0) + " alerts" + (item.has_warning ? " · ⚠ WARNING ACTIVE" : "") +
-      " · data refreshed " + new Date().toLocaleTimeString();
-    airSegment();
+    var engineNote = (live.cycle >= 1 && !live.spokeOk) ? " · ⚠ no audio detected — check sound/voices" : "";
+    setMeta("cycle " + (live.cycle + 1) + " · ~" + Math.round((item.est_read_seconds || 60) / 60) +
+            " min per cycle · " + (item.alerts_included || 0) + " alerts" +
+            (item.has_warning ? " · ⚠ WARNING ACTIVE" : "") +
+            " · cycle started " + new Date().toLocaleTimeString() + engineNote);
+    airSegment(gen);
   }).catch(function () {
-    document.getElementById("live-meta").textContent = "data fetch failed — retrying in 20s (still on air)";
-    setTimeout(fetchCycle, 20000);
+    if (!live.on || gen !== live.gen) return;
+    setMeta("data fetch failed — retrying in 30 s (still on air)");
+    live.retryTimer = setTimeout(function () { fetchCycle(gen); }, 30000);
+  });
+}
+
+// --- EAS watcher: 60 s polling; new alert -> EAS tone -> that ONE alert -> resume ---
+
+function reportTypeLabel(t) {
+  return { amber: "Amber Alert", "missing-child": "Endangered Missing Child Alert",
+           "missing-adult": "Endangered Missing Adult Alert", blue: "Blue Alert",
+           bolo: "Be On the Lookout alert" }[t] || "Safety alert";
+}
+
+function reportText(r, isNew) {
+  var parts = [MWES, (isNew ? "New " : "") + reportTypeLabel(r.type) + "."];
+  if (r.person_name) parts.push("Person: " + r.person_name + ".");
+  if (r.child_name && r.child_name !== r.person_name) parts.push("Child: " + r.child_name + ".");
+  if (r.description) parts.push(String(r.description).split(".")[0] + ".");
+  if (r.vehicle) parts.push("Vehicle: " + r.vehicle + ".");
+  if (r.plate) parts.push("License plate " + String(r.plate).split("").join(" ") + ".");
+  var place = [r.city, r.state, r.country, r.continent].filter(Boolean).join(", ");
+  if (place) parts.push("Location: " + place + ".");
+  parts.push("End of message.");
+  return parts.join(" ");
+}
+
+function easInterrupt(gen, text) {
+  if (!live.on || gen !== live.gen) return;
+  live.gen++; // kill the current narration chain
+  var g = live.gen;
+  WX.cancelSpeech();
+  document.getElementById("now-playing").textContent = "⚠ EMERGENCY ALERT";
+  WX.easTone(8).then(function () {
+    if (!live.on || g !== live.gen) return;
+    speakChunks(text, g, function () {
+      live.segIdx = Math.max(0, live.segIdx - 1); // resume the interrupted segment
+      airSegment(g);
+    });
+  });
+}
+
+function watchTick(gen) {
+  if (!live.on || gen !== live.gen) return;
+  Promise.all([
+    WX.api("/api/nws-alerts").catch(function () { return null; }),
+    WX.api("/api/safety-alerts").catch(function () { return null; }),
+    fetch("api/reports").then(function (r) { return r.json(); }).catch(function () { return null; })
+  ]).then(function (res) {
+    if (!live.on) return; // gen may have advanced via interrupt — ids still shared
+    var ids = new Set(), fresh = [], cancels = [];
+    ((res[0] || {}).data || []).forEach(function (a) {
+      var k = "w|" + a.id;
+      ids.add(k);
+      if (live.seenIds && !live.seenIds.has(k)) {
+        fresh.push(MWES + " New alert. " + (a.event || "Weather alert") + ". Location: " +
+                   ((WX.getLocation() || {}).label || "your area") + "." +
+                   (a.expires ? " In effect until " + a.expires.slice(11, 16) + "." : "") +
+                   " " + (a.headline || "").slice(0, 160) + " End of message.");
+      }
+    });
+    ((res[1] || {}).data || []).forEach(function (a) {
+      var k = "s|" + a.id;
+      ids.add(k);
+      if (live.seenIds && !live.seenIds.has(k)) fresh.push(reportText(a, true));
+    });
+    ((res[2] || {}).reports || []).forEach(function (r) {
+      var k = "r|" + r.id + "|" + r.status;
+      ids.add(k);
+      if (live.seenIds && !live.seenIds.has(k)) {
+        if (r.status === "active") fresh.push(reportText(r, true));
+        else if (live.seenIds.has("r|" + r.id + "|active")) {
+          cancels.push(MWES + " " + reportTypeLabel(r.type) + " for " +
+                       (r.person_name || r.child_name || "the reported person") +
+                       " has been " + r.status + ". End of message.");
+        }
+      }
+    });
+    var first = !live.seenIds;
+    live.seenIds = ids;
+    if (first) return; // seed silently — no backlog barrage
+    if (fresh.length) easInterrupt(live.gen, fresh[0]); // one alert per announcement
+    else if (cancels.length && "speechSynthesis" in window) WX.speak(cancels[0]);
   });
 }
 
 function goOnAir() {
-  if (!WX.getLocation()) { document.getElementById("live-meta").textContent = "Set a location first."; return; }
-  live.on = true; live.cycle = 0;
+  if (!WX.getLocation()) { setMeta("Set a location first."); return; }
+  live.gen++;
+  var gen = live.gen;
+  live.on = true; live.cycle = 0; live.spokeOk = false; live.seenIds = null;
   document.getElementById("onair").innerHTML = "&#9632; Go off air";
   document.getElementById("onair-badge").style.display = "";
+  WX.cancelSpeech();
   if ("speechSynthesis" in window) {
-    speechSynthesis.cancel();
     // Chrome workaround: periodic resume() keeps long sessions from pausing
     live.resumeTimer = setInterval(function () { try { speechSynthesis.resume(); } catch (e) {} }, 10000);
   }
-  if (navigator.wakeLock && navigator.wakeLock.request) {
-    navigator.wakeLock.request("screen")
-      .then(function (wl) { live.wakeLock = wl; })
-      .catch(function () {});
-  }
-  fetchCycle();
+  requestLock();
+  fetchCycle(gen);
+  watchTick(gen); // seed the watcher, then poll every 60 s
+  live.watchTimer = setInterval(function () { watchTick(live.gen); }, 60 * 1000);
+}
+
+function requestLock() {
+  if (!(navigator.wakeLock && navigator.wakeLock.request)) return;
+  navigator.wakeLock.request("screen").then(function (wl) {
+    if (!live.on) { wl.release().catch(function () {}); return; } // raced past off-air
+    if (live.wakeLock) live.wakeLock.release().catch(function () {});
+    live.wakeLock = wl;
+  }).catch(function () {});
 }
 
 function goOffAir() {
   live.on = false;
   clearInterval(live.resumeTimer);
-  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  clearInterval(live.watchTimer);
+  clearTimeout(live.retryTimer);
+  WX.cancelSpeech();
   if (live.wakeLock) { live.wakeLock.release().catch(function () {}); live.wakeLock = null; }
   document.getElementById("onair").innerHTML = "&#128308; Go on air (24/7)";
   document.getElementById("onair-badge").style.display = "none";
   document.getElementById("now-playing").textContent = "";
-  document.getElementById("live-meta").textContent = "off air";
+  setMeta("off air");
 }
 
 document.getElementById("onair").addEventListener("click", function () {
   if (live.on) goOffAir(); else goOnAir();
 });
-// Re-acquire the wake lock when the tab becomes visible again
+
+// Background tabs pause speech while pacing timers keep running; on return,
+// resync cleanly instead of resuming mid-skip.
 document.addEventListener("visibilitychange", function () {
-  if (live.on && document.visibilityState === "visible" && navigator.wakeLock && navigator.wakeLock.request) {
-    navigator.wakeLock.request("screen").then(function (wl) { live.wakeLock = wl; }).catch(function () {});
-  }
+  if (!live.on || document.visibilityState !== "visible") return;
+  requestLock();
+  live.gen++;
+  WX.cancelSpeech();
+  setMeta("resynced after the tab was in the background");
+  fetchCycle(live.gen);
 });
 
 document.getElementById("play").addEventListener("click", function () {
   if (live.on) return; // the 24/7 loop owns the speech channel
-  WX.announce(document.getElementById("script").textContent);
+  if (!live.lastItem || !live.lastItem.script) { setMeta("Set a location first."); return; }
+  if (live.lastItem.has_warning) WX.announce(live.lastItem.script); // tone only for warnings
+  else WX.speak(live.lastItem.script);
 });
 document.getElementById("stop").addEventListener("click", function () {
   if (live.on) goOffAir();
-  else if ("speechSynthesis" in window) speechSynthesis.cancel();
+  else WX.cancelSpeech();
 });
 
-WX.initLocBar(function () { refresh(false); if (live.on) { live.cycle = 0; } });
+// Voice picker
+function fillVoices() {
+  if (!("speechSynthesis" in window)) return;
+  var sel = document.getElementById("voice-sel");
+  var voices = speechSynthesis.getVoices() || [];
+  if (!voices.length) return;
+  var current = WX.pickVoice();
+  sel.innerHTML = voices.map(function (v) {
+    return '<option value="' + WX.esc(v.name) + '"' +
+           (current && v.name === current.name ? " selected" : "") + ">" +
+           WX.esc(v.name + " (" + v.lang + ")") + "</option>";
+  }).join("");
+}
+if ("speechSynthesis" in window) {
+  speechSynthesis.onvoiceschanged = fillVoices;
+  fillVoices();
+  document.getElementById("voice-sel").addEventListener("change", function (e) {
+    WX.setVoice(e.target.value);
+  });
+  document.getElementById("voice-test").addEventListener("click", function () {
+    WX.speak("This is the Official MCrashCraft Weather Emergency Service. Voice test complete.");
+  });
+}
+
+// Animated mini radar for the saved location (RainViewer frames)
+var mini = { map: null, layers: [], idx: 0 };
+function initMiniRadar(lat, lon) {
+  if (typeof L === "undefined") return;
+  if (!mini.map) {
+    mini.map = L.map("miniradar", { zoomControl: false, attributionControl: false }).setView([lat, lon], 7);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+      { subdomains: "abcd", maxZoom: 12 }).addTo(mini.map);
+    setInterval(function () { // frame animation
+      if (!mini.layers.length) return;
+      mini.layers.forEach(function (l, i) { l.setOpacity(i === mini.idx ? 0.8 : 0); });
+      mini.idx = (mini.idx + 1) % mini.layers.length;
+    }, 600);
+  } else {
+    mini.map.setView([lat, lon], 7);
+  }
+  fetch("https://api.rainviewer.com/public/weather-maps.json")
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      mini.layers.forEach(function (l) { mini.map.removeLayer(l); });
+      mini.layers = ((d.radar || {}).past || []).slice(-6).map(function (f) {
+        return L.tileLayer(d.host + f.path + "/256/{z}/{x}/{y}/4/1_1.png",
+          { opacity: 0, maxZoom: 12 }).addTo(mini.map);
+      });
+    }).catch(function () {});
+}
+setInterval(function () { if (live.loc) initMiniRadar(live.loc.lat, live.loc.lon); }, 5 * 60 * 1000);
+
+WX.initLocBar(function () {
+  refresh(false);
+  if (live.on) { // restart the broadcast with the new location
+    live.gen++;
+    live.cycle = 0;
+    live.seenIds = null;
+    WX.cancelSpeech();
+    setMeta("location changed — restarting broadcast");
+    fetchCycle(live.gen);
+  }
+});
 refresh(false);
-setInterval(function () { refresh(true); }, 3 * 60 * 1000);
+setInterval(function () { refresh(true); }, 60 * 1000); // 1-minute alert refresh
 </script>
 </body>
 </html>
