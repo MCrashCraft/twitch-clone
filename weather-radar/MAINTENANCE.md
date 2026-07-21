@@ -49,6 +49,13 @@ silent unless something is broken and can't be auto-fixed.
 
 ## Done
 
+- Tropical cyclone tracking (`/api/tropical` + map layer): NHC development
+  outlook areas, active storm cones/tracks/forecast points/watch segments.
+- River flood gauges (`/api/rivers` + map layer): NWPS water levels near the
+  viewport, colored by flood stage.
+- Wildfire perimeters: WFIGS mapped burn areas (>100 acres) drawn under the
+  incident markers.
+
 - Live lightning layer (Blitzortung websocket, strikes fade over 10 min,
   soft-fail when the socket is unreachable) — main map, Global section.
 - Storm reports layer + `/api/storm-reports` (SPC today's tornado/hail/wind

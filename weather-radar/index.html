@@ -241,6 +241,10 @@
     <div class="sub">SPC tornado risk, Day 1&ndash;2 only (US)</div>
     <label><input id="chk-fireout" type="checkbox" /> Fire weather outlook</label>
     <div class="sub">SPC elevated / critical fire risk, Day 1&ndash;2 (US)</div>
+    <label><input id="chk-tropical" type="checkbox" checked /> Tropical cyclones</label>
+    <div class="sub">NHC 7-day development areas + active storm cones, tracks &amp; watches (Atlantic/Pacific)</div>
+    <label><input id="chk-rivers" type="checkbox" /> River flood gauges</label>
+    <div class="sub">NOAA water levels near map center, colored by flood stage (US; zoom in, then toggle)</div>
     </details>
     <details id="bolo-sec">
     <summary>&#128663; BOLO vehicle board</summary>
@@ -1633,11 +1637,37 @@
       "&outFields=IncidentName,IncidentSize,PercentContained,FireDiscoveryDateTime,POOState,POOCounty," +
       "FireBehaviorGeneral,TotalIncidentPersonnel&f=geojson";
 
+    var WFIGS_PERIMS_URL = "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/" +
+      "WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query?where=poly_GISAcres%3E100" +
+      "&outFields=poly_IncidentName,poly_GISAcres&f=geojson&maxAllowableOffset=0.02&resultRecordCount=800";
+
     var wfigsChk = document.getElementById("chk-wfigs");
     var wfigsGroup = L.layerGroup().addTo(map);
+    var wfigsPerims = L.layerGroup().addTo(map); // separate: wfigsGroup gets cleared on refresh
+
+    function loadFirePerimeters() {
+      fetch(WFIGS_PERIMS_URL)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          wfigsPerims.clearLayers();
+          L.geoJSON(d, {
+            smoothFactor: 2,
+            style: { color: "#ff6d00", weight: 1.5, fillColor: "#ff3d00", fillOpacity: 0.18 },
+            onEachFeature: function (f, layer) {
+              var p = f.properties || {};
+              layer.bindPopup('<div class="ev" style="color:#ff9100">&#128293; ' +
+                escHtml(p.poly_IncidentName || "Fire perimeter") + "</div>" +
+                '<div class="meta">Mapped burn area: ' +
+                Math.round(p.poly_GISAcres || 0).toLocaleString() + " acres</div>", { maxWidth: 260 });
+            }
+          }).addTo(wfigsPerims);
+        })
+        .catch(function () { /* retried on next interval */ });
+    }
 
     function loadWfigs() {
       if (!wfigsChk.checked) return;
+      loadFirePerimeters();
       fetch(WFIGS_URL)
         .then(function (r) { return r.json(); })
         .then(function (d) {
@@ -1676,8 +1706,100 @@
         .catch(function () { /* retried on next interval */ });
     }
     wfigsChk.addEventListener("change", function () {
-      if (wfigsChk.checked) { wfigsGroup.addTo(map); loadWfigs(); }
-      else map.removeLayer(wfigsGroup);
+      if (wfigsChk.checked) { wfigsGroup.addTo(map); wfigsPerims.addTo(map); loadWfigs(); }
+      else { map.removeLayer(wfigsGroup); map.removeLayer(wfigsPerims); }
+    });
+
+    // ---- Tropical cyclones (NHC outlook areas + active storms) ----
+
+    var tropicalChk = document.getElementById("chk-tropical");
+    var tropicalGroup = L.layerGroup().addTo(map);
+
+    function tropicalRiskColor(risk) {
+      return { High: "#e91916", Medium: "#ff8c00", Low: "#ffd24d" }[risk] || "#ffd24d";
+    }
+
+    function loadTropical() {
+      if (!tropicalChk.checked) return;
+      fetch("api/tropical")
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          tropicalGroup.clearLayers();
+          (d.data || []).forEach(function (item) {
+            if (!item.geometry) return;
+            var style, popup;
+            if (item.kind === "outlook") {
+              var col = tropicalRiskColor(item.risk_7day);
+              style = { color: col, weight: 2, dashArray: "6 4", fillColor: col, fillOpacity: 0.15 };
+              popup = '<div class="ev" style="color:' + col + '">&#127786;&#65039; Tropical development area</div>' +
+                '<div class="meta">' + (item.basin || "") + " basin<br>7-day chance: <b>" + (item.prob_7day || "?") +
+                "</b> (" + (item.risk_7day || "?") + ")<br>2-day chance: " + (item.prob_2day || "?") + "</div>";
+            } else if (item.kind === "cone") {
+              style = { color: "#ff5252", weight: 1.5, fillColor: "#ff5252", fillOpacity: 0.18 };
+              popup = '<div class="ev" style="color:#ff5252">&#127744; ' + escHtml(item.name) + " forecast cone</div>" +
+                '<div class="meta">' + (item.advisory_time || "") + "</div>";
+            } else if (item.kind === "track") {
+              style = { color: "#ff8c00", weight: 3 };
+              popup = '<div class="ev" style="color:#ff8c00">Forecast track &middot; ' + escHtml(item.name) + "</div>";
+            } else if (item.kind === "watchwarn") {
+              style = { color: "#ff2d95", weight: 5, opacity: 0.8 };
+              popup = '<div class="ev" style="color:#ff2d95">Tropical watch/warning segment</div>';
+            } else { // forecast points
+              L.circleMarker([item.geometry.coordinates[1], item.geometry.coordinates[0]], {
+                radius: 6, color: "#fff", weight: 1.5, fillColor: "#ff5252", fillOpacity: 0.9
+              }).bindPopup('<div class="ev" style="color:#ff5252">' + escHtml(item.name) + "</div>" +
+                '<div class="meta">' + (item.storm_type || "") +
+                (item.max_wind_kt ? "<br>Max wind: " + item.max_wind_kt + " kt" : "") +
+                "<br>" + (item.advisory_time || "") + "</div>", { maxWidth: 260 }).addTo(tropicalGroup);
+              return;
+            }
+            L.geoJSON({ type: "Feature", geometry: item.geometry }, { style: style, smoothFactor: 2 })
+              .bindPopup(popup, { maxWidth: 280 }).addTo(tropicalGroup);
+          });
+        })
+        .catch(function () { /* retried on next interval */ });
+    }
+    tropicalChk.addEventListener("change", function () {
+      if (tropicalChk.checked) { tropicalGroup.addTo(map); loadTropical(); }
+      else map.removeLayer(tropicalGroup);
+    });
+
+    // ---- River flood gauges (NOAA NWPS, fetched for the current viewport) ----
+
+    var riversChk = document.getElementById("chk-rivers");
+    var riversGroup = L.layerGroup();
+    var RIVER_COLORS = { major: "#b26bd8", moderate: "#e91916", minor: "#ff8c00", action: "#ffd24d",
+                         no_flooding: "#4caf50", not_defined: "#7f8ea3" };
+
+    function loadRivers() {
+      if (!riversChk.checked) return;
+      var c = map.getCenter();
+      fetch("api/rivers?lat=" + c.lat.toFixed(2) + "&lon=" + c.lng.toFixed(2) + "&radius_km=150")
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          riversGroup.clearLayers();
+          (d.data || []).slice(0, 300).forEach(function (g) {
+            var col = RIVER_COLORS[g.observed_category] || RIVER_COLORS.not_defined;
+            L.circleMarker([g.lat, g.lon], {
+              radius: 5, color: col, weight: 1.5, fillColor: col, fillOpacity: 0.7
+            }).bindPopup(
+              '<div class="ev" style="color:' + col + '">&#127754; ' + escHtml(g.name) + "</div>" +
+              '<div class="meta">Stage: ' + (g.observed_ft != null ? g.observed_ft + " ft" : "?") +
+              " &middot; <b>" + (g.observed_category || "?").replace("_", " ") + "</b>" +
+              (g.forecast_category && g.forecast_category.indexOf("fcst") !== 0 ?
+                "<br>Forecast: " + (g.forecast_ft != null ? g.forecast_ft + " ft, " : "") + g.forecast_category.replace("_", " ") : "") +
+              "<br>" + (g.id || "") + " &middot; " + (g.state || "") + "</div>", { maxWidth: 260 })
+              .addTo(riversGroup);
+          });
+        })
+        .catch(function () {});
+    }
+    riversChk.addEventListener("change", function () {
+      if (riversChk.checked) { riversGroup.addTo(map); loadRivers(); }
+      else map.removeLayer(riversGroup);
+    });
+    map.on("moveend", function () {
+      if (riversChk.checked) { clearTimeout(riversGroup._t); riversGroup._t = setTimeout(loadRivers, 900); }
     });
 
     // ---- SPC storm reports (today's tornado/hail/wind reports) ----
@@ -1964,6 +2086,8 @@
     lightningConnect();
     loadStormReports();
     setInterval(loadStormReports, 10 * 60 * 1000);
+    loadTropical();
+    setInterval(loadTropical, 15 * 60 * 1000);
   </script>
 </body>
 </html>

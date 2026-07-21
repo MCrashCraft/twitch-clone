@@ -46,6 +46,8 @@ Endpoints (all accept `lat=&lon=`, `zip=`, `city=[&state=]`, `county=[&state=]`,
 | `/api/gas-incidents` | gas/hazmat dispatch calls | real where a feed covers the location; otherwise simulated for it |
 | `/api/hrrr-summary` | HRRR/GFS blend: storm risk, CAPE, gusts, precip, hourly | real (Open-Meteo) |
 | `/api/storm-reports` | today's SPC tornado/hail/wind reports, optional `radius_km` filter | real (SPC CSVs, proxied) |
+| `/api/tropical` | NHC 7-day development areas + active storm cones/tracks/points/watches | real (NHC ArcGIS) |
+| `/api/rivers` | NOAA river gauges near the location, flood categories + forecasts | real (NWPS API) |
 
 Real CAD coverage: **Seattle** (Fire 911), **Austin** (real-time police/fire
 incident CAD), **Calgary** (city traffic-incident CAD). Everywhere else gets

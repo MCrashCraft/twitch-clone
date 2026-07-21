@@ -625,6 +625,95 @@ def ep_hrrr_summary(q):
 
 
 # ----------------------------------------------------------------------------
+# Tropical cyclones (real: NHC via NOAA ArcGIS — outlook areas + active storms)
+# ----------------------------------------------------------------------------
+
+NHC_BASE = "https://mapservices.weather.noaa.gov/tropical/rest/services/tropical/NHC_tropical_weather/MapServer"
+
+_NHC_KINDS = [
+    ("Seven-Day: Potential Development Region", "outlook"),
+    ("Forecast Cone", "cone"),
+    ("Forecast Track", "track"),
+    ("Forecast Points", "point"),
+    ("Watch-Warning", "watchwarn"),
+]
+
+
+def ep_tropical(q):
+    layers = _cached("nhc:layers", 6 * 3600, lambda: _fetch_json(NHC_BASE + "?f=json")).get("layers", [])
+    data = []
+    for layer in layers:
+        name = layer.get("name", "")
+        kind = next((k for suffix, k in _NHC_KINDS if name.endswith(suffix) or name == suffix), None)
+        if not kind:
+            continue
+        try:
+            gj = _cached("nhc:%s" % layer["id"], 900, lambda lid=layer["id"]: _fetch_json(
+                NHC_BASE + "/%s/query?where=1%%3D1&outFields=*&f=geojson&maxAllowableOffset=0.02" % lid))
+        except Exception:
+            continue
+        for f in gj.get("features", []):
+            p = f.get("properties", {})
+            data.append({
+                "id": "nhc-%s-%s" % (layer["id"], p.get("objectid")),
+                "kind": kind,
+                "storm": (name.split(" ")[0] if kind != "outlook" else None),
+                "name": p.get("stormname") or p.get("STORMNAME") or name,
+                "basin": p.get("basin"),
+                "risk_2day": p.get("risk2day"), "prob_2day": p.get("prob2day"),
+                "risk_7day": p.get("risk7day"), "prob_7day": p.get("prob7day"),
+                "storm_type": p.get("stormtype") or p.get("TCDVLP"),
+                "max_wind_kt": p.get("maxwind") or p.get("MAXWIND"),
+                "advisory_time": p.get("advdate") or p.get("ADVDATE"),
+                "geometry": f.get("geometry"),
+                "status": "active",
+            })
+    return _envelope("tropical", data, resolve_location(q, required=False),
+                     note="NHC tropical weather: 7-day development outlook areas plus active "
+                          "storm cones/tracks/points; empty outside of active tropical activity")
+
+
+# ----------------------------------------------------------------------------
+# River flood gauges (real: NOAA NWPS)
+# ----------------------------------------------------------------------------
+
+def ep_rivers(q):
+    loc = resolve_location(q, required=True)
+    radius = min(float((q.get("radius_km", ["120"])[0]) or 120), 400)
+    dlat = radius / 111.0
+    dlon = radius / max(20.0, 111.0 * math.cos(math.radians(loc["lat"])))
+    url = ("https://api.water.noaa.gov/nwps/v1/gauges?bbox.xmin=%.3f&bbox.ymin=%.3f"
+           "&bbox.xmax=%.3f&bbox.ymax=%.3f&srid=EPSG_4326" %
+           (loc["lon"] - dlon, loc["lat"] - dlat, loc["lon"] + dlon, loc["lat"] + dlat))
+    raw = _cached("nwps:%s" % url, 600, lambda: _fetch_json(url))
+    data = []
+    for g in raw.get("gauges", []):
+        try:
+            la, lo = float(g["latitude"]), float(g["longitude"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        obs = (g.get("status") or {}).get("observed") or {}
+        fcst = (g.get("status") or {}).get("forecast") or {}
+        data.append({
+            "id": g.get("lid"), "name": g.get("name"),
+            "state": (g.get("state") or {}).get("abbreviation"),
+            "lat": la, "lon": lo,
+            "distance_km": round(_haversine_km(loc["lat"], loc["lon"], la, lo), 1),
+            "observed_ft": obs.get("primary") if obs.get("primary", -999) != -999 else None,
+            "observed_category": obs.get("floodCategory"),
+            "observed_time": obs.get("validTime"),
+            "forecast_ft": fcst.get("primary") if fcst.get("primary", -999) != -999 else None,
+            "forecast_category": fcst.get("floodCategory"),
+            "status": obs.get("floodCategory") or "unknown",
+        })
+    data.sort(key=lambda r: r["distance_km"])
+    flooding = [r for r in data if r["observed_category"] in ("action", "minor", "moderate", "major")]
+    return _envelope("rivers", data, loc, extra={"flooding_now": len(flooding)},
+                     note="NOAA National Water Prediction Service gauges near the location; "
+                          "flood categories: action < minor < moderate < major")
+
+
+# ----------------------------------------------------------------------------
 # Router (consumed by server.py)
 # ----------------------------------------------------------------------------
 
@@ -638,6 +727,8 @@ ROUTES = {
     "gas-incidents": ep_gas_incidents,
     "hrrr-summary": ep_hrrr_summary,
     "storm-reports": ep_storm_reports,
+    "tropical": ep_tropical,
+    "rivers": ep_rivers,
 }
 
 
