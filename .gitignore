@@ -38,3 +38,7 @@ next-env.d.ts
 
 # weather radar local database
 weather-radar/weather-radar.sqlite
+
+# python bytecode
+__pycache__/
+*.pyc
