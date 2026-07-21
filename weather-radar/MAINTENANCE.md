@@ -9,10 +9,13 @@ Funnel. Facts to know:
   the container's lifecycle — only activity in the Claude session does. The
   container's background processes can be reaped between sessions, and the
   container itself is reclaimed after long idle.
-- **Self-healing:** scheduled Routines wake the session, restart `tailscaled`
-  and `server.py` if dead, and verify the public URL returns 200. With two
-  staggered keepalives the worst-case downtime after a process reap is ~30
-  minutes; typical recovery is faster.
+- **Self-healing:** scheduled Routines wake the session and run
+  `keepalive.sh`, which health-checks tailscaled via its localapi socket and
+  the app via `/api/status` (never by process name — that false-matches),
+  restarts whatever is dead with the current environment (the container's
+  egress proxy port changes across restarts, so stale daemons must be killed,
+  not trusted), and verifies the public URL returns 200. With keepalives at
+  :07 and :37 the worst-case downtime after a reap is ~30 minutes.
 - **The real fix for 24/7 uptime** is running on hardware you own:
   `git clone` the branch, then `weather-radar/serve.sh --funnel` on any
   always-on machine (old PC, Raspberry Pi, the PowerEdge). Everything —
@@ -22,8 +25,8 @@ Funnel. Facts to know:
 
 | When (UTC) | Routine | What it does |
 | --- | --- | --- |
-| hourly at :42 | keepalive A | restart tailscaled/server if dead; verify public 200 |
-| hourly at :31 | keepalive B | same check, second chance each hour (worst-case gap ~49 min) |
+| hourly at :37 | keepalive A | runs `keepalive.sh`: socket/HTTP health checks, restart what's dead, verify public 200 |
+| hourly at :07 | keepalive B | same script, 30 min staggered — worst-case downtime ~30 min |
 | daily 09:30 | daily health check | curl every API endpoint (local + public), check upstream feeds (NWS, IEM, GIBS, Open-Meteo, Seattle CAD), DB size + 7-day purge sanity, disk usage, headless smoke-load of all 5 pages; fix + push what's broken |
 | weekly Sun 16:00 | improvement pass | pick the top item from the backlog below, implement, test headlessly, push, report briefly |
 
