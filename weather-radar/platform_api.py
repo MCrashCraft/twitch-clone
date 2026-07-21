@@ -152,7 +152,12 @@ def resolve_location(q, required=True):
         if state:  # prefer a match inside the requested state
             named = [r for r in results if _state_code(r.get("admin1", "")) == state]
             results = named or results
-        results = [r for r in results if r.get("country_code") == "US"] or results
+        elif results and results[0].get("country_code") != "US":
+            # Bias toward US matches, but never override a clearly-major
+            # non-US city (e.g. "Calgary" must not become Calgary Place, GA).
+            if (results[0].get("population") or 0) < 100000:
+                us = [r for r in results if r.get("country_code") == "US"]
+                results = us or results
         if not results:
             raise LocationError("could not geocode: " + query)
         r = results[0]
@@ -285,10 +290,35 @@ def ep_noaa_radio(q):
 # 911 public dispatch calls (real: Seattle open data; mock elsewhere)
 # ----------------------------------------------------------------------------
 
+def _map_seattle(rec):
+    return {"id": rec.get("incident_number") or rec.get("datetime"), "type": rec.get("type"),
+            "address": rec.get("address"), "time_local": rec.get("datetime"),
+            "lat": rec.get("latitude"), "lon": rec.get("longitude")}
+
+
+def _map_austin(rec):
+    return {"id": (rec.get("traffic_report_id") or "")[:24], "type": rec.get("issue_reported"),
+            "address": rec.get("address"), "time_local": rec.get("published_date"),
+            "lat": rec.get("latitude"), "lon": rec.get("longitude")}
+
+
+def _map_calgary(rec):
+    return {"id": (rec.get("id") or "")[:32], "type": (rec.get("description") or "Traffic incident").strip(),
+            "address": (rec.get("incident_info") or "").strip(), "time_local": rec.get("start_dt"),
+            "lat": rec.get("latitude"), "lon": rec.get("longitude")}
+
+
 DISPATCH_FEEDS = [
     {"id": "seattle-fire-911", "label": "Seattle Fire 911",
-     "lat": 47.6062, "lon": -122.3321, "coverage_km": 80,
+     "lat": 47.6062, "lon": -122.3321, "coverage_km": 80, "map": _map_seattle,
      "url": "https://data.seattle.gov/resource/kzjm-xkqj.json?%24limit=60&%24order=datetime%20DESC"},
+    {"id": "austin-incidents", "label": "Austin real-time incidents (police/fire CAD)",
+     "lat": 30.2672, "lon": -97.7431, "coverage_km": 80, "map": _map_austin,
+     "url": "https://data.austintexas.gov/resource/dx9v-zd7x.json?%24limit=60"
+            "&%24order=traffic_report_status_date_time%20DESC"},
+    {"id": "calgary-incidents", "label": "Calgary traffic incidents (city CAD)",
+     "lat": 51.0447, "lon": -114.0719, "coverage_km": 60, "map": _map_calgary,
+     "url": "https://data.calgary.ca/resource/35ra-9556.json?%24limit=60&%24order=start_dt%20DESC"},
 ]
 
 _CALL_CATEGORIES = [
@@ -310,20 +340,22 @@ def _call_category(t):
 def _real_calls_near(loc, radius_km):
     for feed in DISPATCH_FEEDS:
         if _haversine_km(loc["lat"], loc["lon"], feed["lat"], feed["lon"]) <= feed["coverage_km"]:
-            rows = _cached("disp:" + feed["id"], 60, lambda: _fetch_json(feed["url"]))
+            rows = _cached("disp:" + feed["id"], 60,
+                           lambda url=feed["url"]: _fetch_json(url))
             calls = []
             for rec in rows:
+                call = feed["map"](rec)
                 try:
-                    la, lo = float(rec["latitude"]), float(rec["longitude"])
+                    la, lo = float(call["lat"]), float(call["lon"])
                 except (KeyError, TypeError, ValueError):
                     continue
                 dist = _haversine_km(loc["lat"], loc["lon"], la, lo)
                 if dist > radius_km:
                     continue
-                calls.append({"id": rec.get("incident_number") or rec.get("datetime"),
-                              "type": rec.get("type"), "category": _call_category(rec.get("type")),
-                              "address": rec.get("address"), "lat": la, "lon": lo,
-                              "time_local": rec.get("datetime"), "distance_km": round(dist, 1),
+                calls.append({"id": call["id"], "type": call["type"],
+                              "category": _call_category(call["type"]),
+                              "address": call["address"], "lat": la, "lon": lo,
+                              "time_local": call["time_local"], "distance_km": round(dist, 1),
                               "feed": feed["id"], "status": "dispatched"})
             calls.sort(key=lambda c: c["time_local"] or "", reverse=True)
             return feed, calls
@@ -415,8 +447,45 @@ def ep_gas_incidents(q):
 # Power outages (mock: national feeds are paywalled/keyed)
 # ----------------------------------------------------------------------------
 
+# British Columbia: BC Hydro publishes a real, keyless outage feed.
+BC_BBOX = (48.2, 60.0, -139.5, -114.0)  # south, north, west, east
+
+
+def _bc_outages(loc):
+    rows = _cached("bchydro", 300, lambda: _fetch_json(
+        "https://www.bchydro.com/power-outages/app/outages-map-data.json"))
+    out = []
+    for r in rows:
+        try:
+            la, lo = float(r["latitude"]), float(r["longitude"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        started = r.get("dateOff")
+        out.append({
+            "id": "BCH-%s" % r.get("id"),
+            "utility": "BC Hydro",
+            "county": r.get("municipality"), "state": "BC",
+            "region": r.get("regionName"),
+            "customers_out": r.get("numCustomersOut") or 0,
+            "cause": r.get("cause") or "under investigation",
+            "started": datetime.fromtimestamp(started / 1000, timezone.utc).isoformat(timespec="minutes") if started else None,
+            "area": (r.get("area") or "")[:200],
+            "lat": la, "lon": lo,
+            "distance_km": round(_haversine_km(loc["lat"], loc["lon"], la, lo), 1),
+            "status": r.get("crewStatusDescription") or r.get("crewStatus") or "reported"})
+    out.sort(key=lambda o: o["distance_km"])
+    return out
+
+
 def ep_power_outages(q):
     loc = resolve_location(q, required=True)
+    if BC_BBOX[0] <= loc["lat"] <= BC_BBOX[1] and BC_BBOX[2] <= loc["lon"] <= BC_BBOX[3]:
+        try:
+            return _envelope("power-outages", _bc_outages(loc), loc,
+                             note="real outage data from BC Hydro's public feed (province-wide, "
+                                  "sorted by distance to your location)")
+        except Exception:
+            pass  # feed down — fall through to simulated
     seed = _seed("power", loc["lat"], loc["lon"])
     county = loc.get("county") or "Local"
     utilities = ["%s Power & Light" % (loc.get("state") or "Regional"),
@@ -439,8 +508,66 @@ def ep_power_outages(q):
             "lon": round(loc["lon"] + (seed[(i * 7 + 3) % 32] - 128) / 2000.0, 4),
             "status": "crews assigned" if seed[i] % 3 else "assessing"})
     return _envelope("power-outages", data, loc, mock=True,
-                     note="mock data: US-wide outage APIs (PowerOutage.us etc.) require paid keys. "
-                          "Shape matches a real integration; swap in a keyed source when available.")
+                     note="simulated data: US-wide outage APIs (PowerOutage.us etc.) require paid keys. "
+                          "Real data is served automatically for British Columbia (BC Hydro public feed).")
+
+
+# ----------------------------------------------------------------------------
+# SPC storm reports (real: today's tornado/hail/wind reports, CSV)
+# ----------------------------------------------------------------------------
+
+def _fetch_text(url, timeout=25):
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "weather-emergency-platform (hobby)", "Accept": "text/csv, text/plain"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", "replace")
+
+
+_SPC_FILES = [
+    ("tornado", "https://www.spc.noaa.gov/climo/reports/today_torn.csv", "F_Scale"),
+    ("hail", "https://www.spc.noaa.gov/climo/reports/today_hail.csv", "Size"),
+    ("wind", "https://www.spc.noaa.gov/climo/reports/today_wind.csv", "Speed"),
+]
+
+
+def ep_storm_reports(q):
+    loc = resolve_location(q, required=False)
+    radius = float((q.get("radius_km", ["0"])[0]) or 0)
+    data = []
+    for kind, url, mag_col in _SPC_FILES:
+        try:
+            text = _cached("spc:" + kind, 600, lambda u=url: _fetch_text(u))
+        except Exception:
+            continue
+        import csv as _csv
+        import io as _io
+        for i, row in enumerate(_csv.DictReader(_io.StringIO(text))):
+            try:
+                la, lo = float(row["Lat"]), float(row["Lon"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            mag = (row.get(mag_col) or "").strip()
+            if kind == "hail" and mag.isdigit():
+                mag = "%.2f in" % (int(mag) / 100.0)
+            elif kind == "wind" and mag.isdigit():
+                mag = mag + " mph"
+            elif kind == "tornado":
+                mag = ("EF" + mag) if mag.isdigit() else mag  # often UNK until surveyed
+            item = {"id": "spc-%s-%03d-%s" % (kind, i, hashlib.md5((str(la) + str(lo)).encode()).hexdigest()[:6]),
+                    "type": kind, "magnitude": mag or "UNK",
+                    "location": row.get("Location"), "county": row.get("County"),
+                    "state": row.get("State"), "lat": la, "lon": lo,
+                    "time_utc": (row.get("Time") or "").zfill(4) + " UTC",
+                    "comments": (row.get("Comments") or "")[:300], "status": "reported"}
+            if loc and radius > 0:
+                d = _haversine_km(loc["lat"], loc["lon"], la, lo)
+                if d > radius:
+                    continue
+                item["distance_km"] = round(d, 1)
+            data.append(item)
+    return _envelope("storm-reports", data, loc,
+                     note="storm reports received by the Storm Prediction Center today "
+                          "(preliminary, US; tornado ratings often UNK until surveyed)")
 
 
 # ----------------------------------------------------------------------------
@@ -510,6 +637,7 @@ ROUTES = {
     "power-outages": ep_power_outages,
     "gas-incidents": ep_gas_incidents,
     "hrrr-summary": ep_hrrr_summary,
+    "storm-reports": ep_storm_reports,
 }
 
 

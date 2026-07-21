@@ -42,9 +42,14 @@ Endpoints (all accept `lat=&lon=`, `zip=`, `city=[&state=]`, `county=[&state=]`,
 | `/api/noaa-radio` | NWR-style broadcast script for the location | real alerts → synthesized script |
 | `/api/911-public-calls` | public CAD dispatch calls near the chosen point | real where a public feed covers the location; otherwise location-specific simulated data (`"mock": true`) |
 | `/api/cad` | alias of 911-public-calls (`?lat=&lon=`, `?city=`, `?county=`, `?zip=`) | same location-based logic |
-| `/api/power-outages` | outage list for county/point | mock (national feeds are paywalled) |
+| `/api/power-outages` | outage list for county/point | **real in British Columbia** (BC Hydro public feed); simulated elsewhere (US national feeds are paywalled) |
 | `/api/gas-incidents` | gas/hazmat dispatch calls | real where a feed covers the location; otherwise simulated for it |
 | `/api/hrrr-summary` | HRRR/GFS blend: storm risk, CAPE, gusts, precip, hourly | real (Open-Meteo) |
+| `/api/storm-reports` | today's SPC tornado/hail/wind reports, optional `radius_km` filter | real (SPC CSVs, proxied) |
+
+Real CAD coverage: **Seattle** (Fire 911), **Austin** (real-time police/fire
+incident CAD), **Calgary** (city traffic-incident CAD). Everywhere else gets
+clearly-flagged simulated data for the chosen location only.
 
 Every response: `{endpoint, status, generated, mock, location, count, data[]}` —
 each `data` item has an `id` and `status`. Errors return HTTP 400 with

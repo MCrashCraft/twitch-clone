@@ -34,17 +34,15 @@ silent unless something is broken and can't be auto-fixed.
 
 ## Improvement backlog (weekly routine works top-down)
 
-1. Add more real-time public CAD dispatch feeds (candidate cities with open
-   Socrata feeds + coordinates) to `DISPATCH_FEEDS` in both `platform_api.py`
-   and `index.html`.
-2. Alert history charts page (`history.html`) — timeline of warnings per day
+1. Alert history charts page (`history.html`) — timeline of warnings per day
    from `/api/history`, using canvas sparklines.
 3. Service-worker caching so pages load instantly and survive brief server
    restarts (stale-while-revalidate for API calls).
 4. Push notifications (Web Push) for new warnings in the saved location.
 5. Real power-outage integration behind an optional API key (PowerOutage.us),
    replacing the mock when a key is configured.
-6. Storm reports layer (SPC storm reports CSV — tornado/hail/wind reports).
+6. More real CAD feeds: Nashville active dispatch moved to an ArcGIS hub —
+   find its new FeatureServer endpoint and add it; scan other cities' portals.
 8. PWA manifest + install prompt so the site works as a phone app.
 9. Per-page URL params (?loc=45320) so locations are shareable links.
 10. Wire the WebGPU renderer into the main map behind a settings toggle.
@@ -53,6 +51,14 @@ silent unless something is broken and can't be auto-fixed.
 
 - Live lightning layer (Blitzortung websocket, strikes fade over 10 min,
   soft-fail when the socket is unreachable) — main map, Global section.
+- Storm reports layer + `/api/storm-reports` (SPC today's tornado/hail/wind
+  reports, radius filtering).
+- Real CAD feeds expanded: Austin real-time incidents + Calgary traffic
+  incidents added alongside Seattle Fire 911 (verified live, keyless,
+  coordinates present; Cincinnati rejected as stale, Nashville moved to
+  ArcGIS — future candidate).
+- Real power outages for British Columbia via BC Hydro's public feed;
+  other regions remain clearly-labeled simulation.
 
 ## Manual checklist (occasionally)
 

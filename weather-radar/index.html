@@ -202,6 +202,8 @@
     </div>
     <label><input id="chk-alerts" type="checkbox" checked /> Weather alerts <span id="alert-count"></span></label>
     <div class="sub">Tornado, severe storm, flood, fire, smoke &amp; air quality alerts (NWS, US only)</div>
+    <label><input id="chk-stormrep" type="checkbox" checked /> Storm reports (today)</label>
+    <div class="sub">Tornado, hail &amp; damaging-wind reports received by SPC today (US, preliminary)</div>
     <label><input id="chk-wfigs" type="checkbox" checked /> Confirmed wildfires</label>
     <div class="sub">Real dispatched fire incidents with name, size &amp; containment (NIFC/WFIGS, North America&ndash;US)</div>
     <label><input id="chk-dispatch" type="checkbox" checked /> 911 dispatch calls</label>
@@ -1678,6 +1680,45 @@
       else map.removeLayer(wfigsGroup);
     });
 
+    // ---- SPC storm reports (today's tornado/hail/wind reports) ----
+
+    var STORMREP_STYLE = {
+      tornado: { color: "#ff1f1f", radius: 7 },
+      hail: { color: "#7fe8ff", radius: 5 },
+      wind: { color: "#9aa7c7", radius: 5 }
+    };
+    var stormRepChk = document.getElementById("chk-stormrep");
+    var stormRepGroup = L.layerGroup().addTo(map);
+
+    function loadStormReports() {
+      if (!stormRepChk.checked) return;
+      fetch("api/storm-reports")
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          stormRepGroup.clearLayers();
+          (d.data || []).forEach(function (r) {
+            var st = STORMREP_STYLE[r.type] || STORMREP_STYLE.wind;
+            L.circleMarker([r.lat, r.lon], {
+              radius: st.radius, color: st.color, weight: 2,
+              fillColor: st.color, fillOpacity: 0.4
+            }).bindPopup(
+              '<div class="ev" style="color:' + st.color + '">' +
+              (r.type === "tornado" ? "&#127786;&#65039; Tornado report" :
+               r.type === "hail" ? "&#129712; Hail report" : "&#128168; Wind damage report") +
+              " &middot; " + (r.magnitude || "UNK") + "</div>" +
+              '<div class="meta">' + (r.location || "") + " &middot; " + (r.county || "") + ", " + (r.state || "") +
+              "<br>" + r.time_utc + "</div>" +
+              (r.comments ? '<div class="desc">' + r.comments + "</div>" : ""),
+              { maxWidth: 300 }).addTo(stormRepGroup);
+          });
+        })
+        .catch(function () { /* retried on next interval */ });
+    }
+    stormRepChk.addEventListener("change", function () {
+      if (stormRepChk.checked) { stormRepGroup.addTo(map); loadStormReports(); }
+      else map.removeLayer(stormRepGroup);
+    });
+
     // ---- Public 911 dispatch feeds (official open-data CAD logs, not audio) ----
 
     var DISPATCH_FEEDS = [
@@ -1689,6 +1730,26 @@
           if (!isFinite(lat) || !isFinite(lon)) return null;
           return { id: rec.incident_number || (rec.datetime + rec.address), type: rec.type || "Call",
                    addr: rec.address || "", timeText: (rec.datetime || "").slice(11, 16), lat: lat, lon: lon };
+        }
+      },
+      {
+        id: "austin-incidents", label: "Austin incidents",
+        url: "https://data.austintexas.gov/resource/dx9v-zd7x.json?$limit=50&$order=traffic_report_status_date_time%20DESC",
+        parse: function (rec) {
+          var lat = parseFloat(rec.latitude), lon = parseFloat(rec.longitude);
+          if (!isFinite(lat) || !isFinite(lon)) return null;
+          return { id: (rec.traffic_report_id || "").slice(0, 24), type: rec.issue_reported || "Incident",
+                   addr: rec.address || "", timeText: (rec.published_date || "").slice(11, 16), lat: lat, lon: lon };
+        }
+      },
+      {
+        id: "calgary-incidents", label: "Calgary incidents",
+        url: "https://data.calgary.ca/resource/35ra-9556.json?$limit=50&$order=start_dt%20DESC",
+        parse: function (rec) {
+          var lat = parseFloat(rec.latitude), lon = parseFloat(rec.longitude);
+          if (!isFinite(lat) || !isFinite(lon)) return null;
+          return { id: (rec.id || "").slice(0, 32), type: (rec.description || "Traffic incident").trim(),
+                   addr: (rec.incident_info || "").trim(), timeText: (rec.start_dt || "").slice(11, 16), lat: lat, lon: lon };
         }
       }
       // Add more legal public CAD feeds here: {id, label, url, parse(record) -> {id,type,addr,timeText,lat,lon}}
@@ -1901,6 +1962,8 @@
     loadBolo();
     setInterval(loadBolo, 5 * 60 * 1000);
     lightningConnect();
+    loadStormReports();
+    setInterval(loadStormReports, 10 * 60 * 1000);
   </script>
 </body>
 </html>
