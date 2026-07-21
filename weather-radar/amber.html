@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AMBER &amp; BOLO — Weather Emergency Platform</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128680;</text></svg>" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<nav class="topnav">
+  <span class="brand"><span class="dot"></span>Weather Emergency</span>
+  <a href="/">🗺 Map</a><a href="radio.html">📻 NOAA Radio</a>
+  <a href="911.html">🚒 911 Dispatch</a><a href="powerlines.html">⚡ Downed Lines</a>
+  <a class="active" href="amber.html">🚨 AMBER / BOLO</a><a href="api/status">API</a>
+</nav>
+<div class="wrap">
+  <header class="page">
+    <h1>🚨 AMBER Alerts &amp; BOLO Board</h1>
+    <p>Live AMBER alerts from the official NWS Child Abduction Emergency feed, with suspect
+       vehicle and plate auto-extracted — plus the hobby be-on-the-lookout vehicle board
+       (AMBER-derived + manual entries, stored 7 days).</p>
+  </header>
+
+  <div class="locbar">
+    <input id="loc-input" type="text" placeholder='State filter — e.g. "Dayton, OH" or 45320 (or leave empty for nationwide)' />
+    <button id="loc-set" class="primary">Set location</button>
+    <button id="loc-mine">📍 My location</button>
+    <span id="loc-label" class="status-line" style="margin:0"></span>
+  </div>
+
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px">
+    <label class="swrow">Voice new AMBER alerts
+      <span class="switch"><input id="voice" type="checkbox" /><i></i></span></label>
+    <span id="status" class="count"></span>
+  </div>
+
+  <div id="alerts" class="grid" style="margin-bottom:22px"></div>
+
+  <h2 style="font-size:16px; margin:8px 0 10px">🚔 BOLO vehicle board</h2>
+  <div class="card" style="margin-bottom:12px">
+    <div style="display:flex; gap:8px; flex-wrap:wrap">
+      <input id="bolo-vehicle" type="text" placeholder="Vehicle (e.g. red Ford F-150)" maxlength="90"
+             style="flex:1; min-width:200px; padding:9px 12px; background:#26262c; color:#efeff1; border:1px solid rgba(255,255,255,0.12); border-radius:8px" />
+      <input id="bolo-plate" type="text" placeholder="Plate" maxlength="12"
+             style="width:120px; padding:9px 12px; background:#26262c; color:#efeff1; border:1px solid rgba(255,255,255,0.12); border-radius:8px" />
+      <button id="bolo-add" class="primary">Add BOLO</button>
+    </div>
+  </div>
+  <div id="bolo" class="grid"></div>
+</div>
+
+<script src="assets/site.js"></script>
+<script>
+"use strict";
+var seenAmber = null;
+
+function refreshAmber() {
+  WX.api("/api/amber-alerts").then(function (d) {
+    var box = document.getElementById("alerts");
+    var scope = d.location && d.location.state ? " for " + d.location.state : " nationwide";
+    document.getElementById("status").textContent = d.count + " active" + scope +
+      " · checks every 2 min";
+    if (!(d.data || []).length) {
+      box.innerHTML = '<div class="card accent" style="--ac:#4caf50"><h3>✅ No active AMBER alerts' +
+        WX.esc(scope) + '</h3><div class="meta">That is the good outcome. This page keeps checking automatically.</div></div>';
+      seenAmber = new Set();
+      return;
+    }
+    var fresh = [];
+    var ids = new Set();
+    d.data.forEach(function (a) {
+      ids.add(String(a.id));
+      if (seenAmber && !seenAmber.has(String(a.id))) fresh.push(a);
+    });
+    var first = !seenAmber;
+    seenAmber = ids;
+    if (!first && document.getElementById("voice").checked) {
+      fresh.forEach(function (a) {
+        WX.announce("Amber alert. " + (a.areas || "") + ". Vehicle: " + (a.vehicle || "unknown") +
+                    ". Plate " + ((a.plate || "unknown").split("").join(" ")) + ".");
+      });
+    }
+    box.innerHTML = d.data.map(function (a) {
+      return '<div class="card accent" style="--ac:#ff2d95"><h3>🚨 ' + WX.esc(a.event) + "</h3>" +
+        '<div class="meta">' + WX.esc(a.areas) + "<br>Sent " + WX.esc((a.sent || "?").slice(0, 16).replace("T", " ")) + "</div>" +
+        (a.vehicle ? '<div class="meta" style="margin-top:6px">🚗 <b>Vehicle:</b> ' + WX.esc(a.vehicle) + "</div>" : "") +
+        (a.plate ? '<div class="meta">🔢 <b>Plate:</b> <span class="badge" style="background:#ffd000">' + WX.esc(a.plate) + "</span></div>" : "") +
+        (a.description ? '<div class="desc">' + WX.esc(a.description) + "</div>" : "") + "</div>";
+    }).join("");
+  }).catch(function () {
+    document.getElementById("status").textContent = "AMBER feed fetch failed — retrying.";
+  });
+}
+
+function refreshBolo() {
+  fetch("api/bolo").then(function (r) { return r.json(); }).then(function (d) {
+    var box = document.getElementById("bolo");
+    if (!(d.entries || []).length) {
+      box.innerHTML = '<div class="card"><h3>No BOLO entries</h3><div class="meta">Entries appear here from AMBER alerts automatically, or add one above.</div></div>';
+      return;
+    }
+    box.innerHTML = d.entries.map(function (e) {
+      var age = Math.max(0, Math.round((Date.now() / 1000 - e.created) / 3600));
+      return '<div class="card accent" style="--ac:#2ea8ff"><h3>🚔 ' + WX.esc(e.vehicle || "Vehicle ?") +
+        (e.plate ? ' <span class="badge" style="background:#ffd000">' + WX.esc(e.plate) + "</span>" : "") + "</h3>" +
+        '<div class="meta">Source: ' + WX.esc((e.source || "").split(":")[0]) + " · " + age + "h ago" +
+        (e.details ? "<br>" + WX.esc(e.details) : "") + "</div></div>";
+    }).join("");
+  }).catch(function () {
+    document.getElementById("bolo").innerHTML =
+      '<div class="card"><h3>BOLO board unavailable</h3><div class="meta">Needs the server.py API.</div></div>';
+  });
+}
+
+document.getElementById("bolo-add").addEventListener("click", function () {
+  var vehicle = document.getElementById("bolo-vehicle").value.trim();
+  var plate = document.getElementById("bolo-plate").value.trim();
+  if (!vehicle && !plate) return;
+  fetch("api/bolo", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ vehicle: vehicle, plate: plate, details: "added from amber page" }) })
+    .then(function () {
+      document.getElementById("bolo-vehicle").value = "";
+      document.getElementById("bolo-plate").value = "";
+      refreshBolo();
+    });
+});
+
+WX.initLocBar(function () { seenAmber = null; refreshAmber(); });
+refreshAmber();
+refreshBolo();
+setInterval(refreshAmber, 2 * 60 * 1000);
+setInterval(refreshBolo, 5 * 60 * 1000);
+</script>
+</body>
+</html>
